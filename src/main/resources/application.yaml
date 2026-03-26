@@ -1,0 +1,45 @@
+spring:
+  application:
+    name: manufacturing-monitor
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:sqlserver}
+
+  jpa:
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    default-property-inclusion: non_null
+
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+
+app:
+  simulator:
+    enabled: true
+    interval-ms: 2000
+    machine-count: 5
+  realtime:
+    sse-timeout-ms: 300000
+  aggregation:
+    interval-ms: 60000
