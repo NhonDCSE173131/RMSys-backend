@@ -24,7 +24,7 @@ class SseEmitterRegistryTest {
 
         var envelope = registry.buildEnvelope("machine-telemetry-updated", payload);
 
-        assertEquals("machine-telemetry-updated", envelope.type());
+        assertEquals("telemetry.updated", envelope.type());
         assertEquals(machineId, envelope.machineId());
         assertEquals(payload, envelope.payload());
         assertNotNull(envelope.ts());

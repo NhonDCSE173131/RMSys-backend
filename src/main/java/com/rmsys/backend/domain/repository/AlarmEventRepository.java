@@ -19,4 +19,5 @@ public interface AlarmEventRepository extends JpaRepository<AlarmEventEntity, UU
     Page<AlarmEventEntity> findByMachineIdOrderByStartedAtDesc(UUID machineId, Pageable pageable);
     Page<AlarmEventEntity> findAllByOrderByStartedAtDesc(Pageable pageable);
     List<AlarmEventEntity> findByMachineIdAndStartedAtBetween(UUID machineId, Instant from, Instant to);
+    Page<AlarmEventEntity> findByMachineIdAndStartedAtBetweenOrderByStartedAtDesc(UUID machineId, Instant from, Instant to, Pageable pageable);
 }

@@ -10,5 +10,7 @@ public interface DowntimeEventRepository extends JpaRepository<DowntimeEventEnti
     List<DowntimeEventEntity> findByMachineIdAndStartedAtBetween(UUID machineId, Instant from, Instant to);
     long countByAbnormalStopTrueAndStartedAtAfter(Instant since);
     List<DowntimeEventEntity> findByMachineIdOrderByStartedAtDesc(UUID machineId);
+    org.springframework.data.domain.Page<DowntimeEventEntity> findByMachineIdOrderByStartedAtDesc(UUID machineId, org.springframework.data.domain.Pageable pageable);
+    org.springframework.data.domain.Page<DowntimeEventEntity> findByMachineIdAndStartedAtBetweenOrderByStartedAtDesc(UUID machineId, Instant from, Instant to, org.springframework.data.domain.Pageable pageable);
 }
 

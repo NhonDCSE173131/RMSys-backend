@@ -70,6 +70,17 @@ public class AlarmServiceImpl implements AlarmService, AlarmLifecycleService {
     }
 
     @Override
+    public PageResponse<AlarmResponse> getMachineAlarmHistory(UUID machineId, Instant from, Instant to, Pageable pageable) {
+        if (from != null && to != null) {
+            var page = alarmRepo.findByMachineIdAndStartedAtBetweenOrderByStartedAtDesc(machineId, from, to, pageable)
+                    .map(this::toResponse);
+            return PageResponse.of(page);
+        }
+        var page = alarmRepo.findByMachineIdOrderByStartedAtDesc(machineId, pageable).map(this::toResponse);
+        return PageResponse.of(page);
+    }
+
+    @Override
     @Transactional
     public void acknowledgeAlarm(UUID alarmId, AckAlarmRequest request) {
         var alarm = alarmRepo.findById(alarmId)

@@ -1,79 +1,203 @@
 package com.rmsys.backend.infrastructure.realtime;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.util.ArrayDeque;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Slf4j
 @Component
 public class SseEmitterRegistry {
 
-    private final Map<String, SseEmitter> emitters = new ConcurrentHashMap<>();
+    private final Map<String, RealtimeSubscription> subscriptions = new ConcurrentHashMap<>();
     private final long timeout;
+    private final int replayBufferSize;
+    private final AtomicLong sequence = new AtomicLong(0);
+    private final ArrayDeque<SseEventEnvelope> replayBuffer = new ArrayDeque<>();
 
-    public SseEmitterRegistry(@Value("${app.realtime.sse-timeout-ms:300000}") long timeout) {
+    @Autowired
+    public SseEmitterRegistry(
+            @Value("${app.realtime.sse-timeout-ms:300000}") long timeout,
+            @Value("${app.realtime.replay-buffer-size:500}") int replayBufferSize) {
         this.timeout = timeout;
+        this.replayBufferSize = replayBufferSize;
     }
 
-    public SseEmitter createEmitter() {
+    // Backward-compatible overload for tests and direct construction.
+    public SseEmitterRegistry(long timeout) {
+        this(timeout, 500);
+    }
+
+    public SseEmitter createEmitter(UUID machineId, String topics, String sinceEventId) {
         var id = UUID.randomUUID().toString();
         var emitter = new SseEmitter(timeout);
+        var parsedTopics = parseTopics(topics);
+        var subscription = new RealtimeSubscription(id, machineId, parsedTopics, emitter);
 
         emitter.onCompletion(() -> {
-            emitters.remove(id);
+            subscriptions.remove(id);
             log.debug("SSE completed: {}", id);
         });
         emitter.onTimeout(() -> {
-            emitters.remove(id);
+            subscriptions.remove(id);
             log.debug("SSE timeout: {}", id);
         });
         emitter.onError(e -> {
-            emitters.remove(id);
+            subscriptions.remove(id);
             log.debug("SSE error: {}", id);
         });
 
-        emitters.put(id, emitter);
-        log.info("SSE subscriber connected: {} (total: {})", id, emitters.size());
+        subscriptions.put(id, subscription);
+        replayMissedEvents(subscription, sinceEventId);
+        log.info("SSE subscriber connected: {} machineId={} topics={} total={}", id, machineId, parsedTopics, subscriptions.size());
         return emitter;
     }
 
     public void broadcast(String eventName, Object data) {
         var envelope = buildEnvelope(eventName, data);
+        appendReplayBuffer(envelope);
 
         var deadIds = new java.util.ArrayList<String>();
-        emitters.forEach((id, emitter) -> {
+        subscriptions.forEach((id, subscription) -> {
             try {
-                emitter.send(SseEmitter.event().name(eventName).data(envelope));
+                if (subscription.matches(envelope.eventType(), envelope.machineId())) {
+                    subscription.emitter().send(SseEmitter.event()
+                            .id(envelope.eventId())
+                            .name(eventName)
+                            .data(envelope));
+                }
             } catch (IOException e) {
                 deadIds.add(id);
             }
         });
 
-        deadIds.forEach(emitters::remove);
+        deadIds.forEach(subscriptions::remove);
     }
 
     public void sendHeartbeat() {
-        broadcast("ping", Map.of("activeSubscribers", getActiveCount()));
+        broadcast("heartbeat.ping", Map.of("activeSubscribers", getActiveCount()));
     }
 
     SseEventEnvelope buildEnvelope(String eventName, Object data) {
+        var now = Instant.now();
+        var nextSequence = sequence.incrementAndGet();
         return SseEventEnvelope.builder()
-                .type(eventName)
-                .ts(Instant.now())
+                .eventId("evt-" + nextSequence)
+                .eventType(toEventType(eventName))
                 .machineId(extractMachineId(data))
+                .sourceTs(extractSourceTs(data, now))
+                .receivedAt(now)
+                .sequence(nextSequence)
+                .quality(extractQuality(data))
                 .payload(data)
                 .build();
     }
 
     public int getActiveCount() {
-        return emitters.size();
+        return subscriptions.size();
+    }
+
+    public Map<String, Object> health() {
+        var result = new LinkedHashMap<String, Object>();
+        result.put("activeSubscribers", getActiveCount());
+        result.put("replayBufferSize", replayBuffer.size());
+        result.put("latestSequence", sequence.get());
+        return result;
+    }
+
+    private void replayMissedEvents(RealtimeSubscription subscription, String sinceEventId) {
+        if (sinceEventId == null || sinceEventId.isBlank()) {
+            return;
+        }
+        long since = parseEventId(sinceEventId);
+        if (since <= 0) {
+            return;
+        }
+
+        synchronized (replayBuffer) {
+            for (SseEventEnvelope envelope : replayBuffer) {
+                if (envelope.sequence() != null
+                        && envelope.sequence() > since
+                        && subscription.matches(envelope.eventType(), envelope.machineId())) {
+                    try {
+                        subscription.emitter().send(SseEmitter.event()
+                                .id(envelope.eventId())
+                                .name(envelope.eventType())
+                                .data(envelope));
+                    } catch (IOException ex) {
+                        subscriptions.remove(subscription.id());
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    private void appendReplayBuffer(SseEventEnvelope envelope) {
+        synchronized (replayBuffer) {
+            replayBuffer.addLast(envelope);
+            while (replayBuffer.size() > replayBufferSize) {
+                replayBuffer.removeFirst();
+            }
+        }
+    }
+
+    private Set<String> parseTopics(String topics) {
+        if (topics == null || topics.isBlank()) {
+            return Set.of("all");
+        }
+        return Arrays.stream(topics.split(","))
+                .map(String::trim)
+                .map(String::toLowerCase)
+                .filter(s -> !s.isBlank())
+                .collect(java.util.stream.Collectors.toCollection(HashSet::new));
+    }
+
+    private long parseEventId(String eventId) {
+        try {
+            if (eventId.startsWith("evt-")) {
+                return Long.parseLong(eventId.substring(4));
+            }
+            return Long.parseLong(eventId);
+        } catch (NumberFormatException ignored) {
+            return -1;
+        }
+    }
+
+    private String toEventType(String eventName) {
+        if (eventName == null || eventName.isBlank()) {
+            return "unknown";
+        }
+        String normalized = eventName.toLowerCase().replace('_', '.').replace('-', '.');
+        if (normalized.startsWith("machine.telemetry")) {
+            return "telemetry.updated";
+        }
+        if (normalized.startsWith("alarm.")) {
+            return normalized;
+        }
+        if (normalized.startsWith("machine.connection")) {
+            return normalized;
+        }
+        if (normalized.startsWith("downtime.")) {
+            return normalized;
+        }
+        if (normalized.startsWith("heartbeat")) {
+            return "heartbeat";
+        }
+        return normalized;
     }
 
     private UUID extractMachineId(Object data) {
@@ -106,5 +230,38 @@ public class SseEmitterRegistry {
         }
 
         return null;
+    }
+
+    private Instant extractSourceTs(Object data, Instant fallback) {
+        if (data == null) {
+            return fallback;
+        }
+
+        try {
+            var method = data.getClass().getMethod("ts");
+            var result = method.invoke(data);
+            if (result instanceof Instant instant) {
+                return instant;
+            }
+        } catch (ReflectiveOperationException ignored) {
+            // keep fallback
+        }
+        return fallback;
+    }
+
+    private String extractQuality(Object data) {
+        if (data == null) {
+            return "UNKNOWN";
+        }
+        try {
+            var method = data.getClass().getMethod("quality");
+            var result = method.invoke(data);
+            if (result != null) {
+                return result.toString();
+            }
+        } catch (ReflectiveOperationException ignored) {
+            // fallback below
+        }
+        return "GOOD";
     }
 }
