@@ -169,7 +169,13 @@ public class MachineConnectionStateServiceImpl implements MachineConnectionState
         payload.put("ts", at);
         sseRegistry.broadcast(eventName, payload);
 
-        log.info("Machine {} connection {} -> {}", machine.getId(), fromState, toState);
+        if ("ONLINE".equals(toState) && !"ONLINE".equals(fromState)) {
+            log.info("Da nhan du lieu tu nguon PLC/collector cho may {} ({}) - connection {} -> {}",
+                    machine.getCode(), machine.getName(), fromState, toState);
+            return;
+        }
+
+        log.info("Machine {} ({}) connection {} -> {}", machine.getCode(), machine.getName(), fromState, toState);
     }
 
     private Instant max(Instant current, Instant candidate) {

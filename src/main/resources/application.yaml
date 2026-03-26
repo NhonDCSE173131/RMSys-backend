@@ -36,7 +36,7 @@ springdoc:
 
 app:
   simulator:
-    enabled: true
+    enabled: false
     interval-ms: 2000
     machine-count: 5
   connection:

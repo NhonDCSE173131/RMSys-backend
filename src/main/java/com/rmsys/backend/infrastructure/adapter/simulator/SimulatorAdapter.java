@@ -10,7 +10,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 @Slf4j
@@ -20,6 +19,7 @@ public class SimulatorAdapter implements DeviceAdapter {
 
     private final MachineRepository machineRepo;
     private final IngestService ingestService;
+    private final java.util.concurrent.atomic.AtomicBoolean simulatorStartedLogged = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     // Simulation state per machine
     private final java.util.Map<java.util.UUID, SimState> states = new java.util.concurrent.ConcurrentHashMap<>();
@@ -31,6 +31,10 @@ public class SimulatorAdapter implements DeviceAdapter {
 
     public void simulateAll() {
         var machines = machineRepo.findAll();
+        long enabledMachines = machines.stream().filter(MachineEntity::getIsEnabled).count();
+        if (enabledMachines > 0 && simulatorStartedLogged.compareAndSet(false, true)) {
+            log.info("Simulator noi bo da kich hoat. Bat dau sinh du lieu mo phong cho {} may.", enabledMachines);
+        }
         for (var machine : machines) {
             if (!machine.getIsEnabled()) continue;
             var state = states.computeIfAbsent(machine.getId(), k -> new SimState());
