@@ -1,5 +1,6 @@
 package com.rmsys.backend.domain.service.impl;
 
+import com.rmsys.backend.common.exception.AppException;
 import com.rmsys.backend.common.enumtype.ConnectionStatus;
 import com.rmsys.backend.domain.entity.MachineEntity;
 import com.rmsys.backend.domain.repository.MachineRepository;
@@ -70,6 +71,33 @@ public class MachineConnectionStateServiceImpl implements MachineConnectionState
         machine.setConnectionState(targetState);
         registerFlapTransition(machine, now);
         emitConnectionChanged(machine, previousState, targetState, now);
+        machineRepo.save(machine);
+    }
+
+    @Override
+    public void markConnectionReported(MachineEntity machine, String reportedState, Instant at, Map<String, Object> metadata) {
+        var previousState = normalizeState(machine.getConnectionState());
+        var targetState = normalizeReportedState(reportedState);
+
+        if (ConnectionStatus.ONLINE.name().equals(targetState) || ConnectionStatus.STALE.name().equals(targetState)) {
+            machine.setLastSeenAt(at);
+        }
+
+        if (!targetState.equals(previousState)) {
+            machine.setConnectionState(targetState);
+            registerFlapTransition(machine, at);
+            emitConnectionChanged(machine, previousState, targetState, at);
+        }
+
+        if (metadata != null && !metadata.isEmpty()) {
+            sseRegistry.broadcast("machine-connection-reported", Map.of(
+                    "machineId", machine.getId(),
+                    "state", targetState,
+                    "metadata", metadata,
+                    "ts", at
+            ));
+        }
+
         machineRepo.save(machine);
     }
 
@@ -156,6 +184,21 @@ public class MachineConnectionStateServiceImpl implements MachineConnectionState
 
     private String normalizeState(String state) {
         return state == null ? ConnectionStatus.OFFLINE.name() : state;
+    }
+
+    private String normalizeReportedState(String reportedState) {
+        if (reportedState == null || reportedState.isBlank()) {
+            throw new AppException("VALIDATION_ERROR", "connectionStatus is required");
+        }
+
+        String normalized = reportedState.trim().toUpperCase();
+        return switch (normalized) {
+            case "ONLINE", "ON" -> ConnectionStatus.ONLINE.name();
+            case "STALE", "DEGRADED", "LAGGING" -> ConnectionStatus.STALE.name();
+            case "OFFLINE", "DISCONNECTED" -> ConnectionStatus.OFFLINE.name();
+            case "RECOVERING" -> ConnectionStatus.ONLINE.name();
+            default -> throw new AppException("VALIDATION_ERROR", "Unsupported connectionStatus: " + reportedState);
+        };
     }
 }
 

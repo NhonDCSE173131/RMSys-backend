@@ -13,6 +13,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -118,6 +119,19 @@ class MachineConnectionStateServiceImplTest {
 
         assertFalse(Boolean.TRUE.equals(machine.getConnectionUnstable()));
         assertEquals(0, machine.getConnectionFlapCount());
+    }
+
+    @Test
+    void markConnectionReported_degradedMapsToStale() {
+        var now = Instant.now();
+        var machine = baseMachine();
+        machine.setConnectionState(ConnectionStatus.ONLINE.name());
+
+        service.markConnectionReported(machine, "DEGRADED", now, Map.of("readLatencyMs", 1500));
+
+        assertEquals(ConnectionStatus.STALE.name(), machine.getConnectionState());
+        verify(sseRegistry).broadcast(eq("machine-connection-stale"), any());
+        verify(sseRegistry).broadcast(eq("machine-connection-reported"), any());
     }
 
     private MachineEntity baseMachine() {

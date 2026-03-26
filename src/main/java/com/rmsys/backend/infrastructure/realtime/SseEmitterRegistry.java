@@ -6,7 +6,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.Arrays;
@@ -79,7 +78,12 @@ public class SseEmitterRegistry {
                             .name(eventName)
                             .data(envelope));
                 }
-            } catch (IOException e) {
+            } catch (Exception ex) {
+                if (isClientAbort(ex)) {
+                    log.debug("SSE client disconnected while sending event. subscriptionId={} event={}", id, eventName);
+                } else {
+                    log.warn("SSE send failed. subscriptionId={} event={} error={}", id, eventName, rootMessage(ex));
+                }
                 deadIds.add(id);
             }
         });
@@ -137,7 +141,12 @@ public class SseEmitterRegistry {
                                 .id(envelope.eventId())
                                 .name(envelope.eventType())
                                 .data(envelope));
-                    } catch (IOException ex) {
+                    } catch (Exception ex) {
+                        if (isClientAbort(ex)) {
+                            log.debug("SSE replay skipped due to disconnected client. subscriptionId={}", subscription.id());
+                        } else {
+                            log.warn("SSE replay failed. subscriptionId={} error={}", subscription.id(), rootMessage(ex));
+                        }
                         subscriptions.remove(subscription.id());
                         return;
                     }
@@ -263,5 +272,41 @@ public class SseEmitterRegistry {
             // fallback below
         }
         return "GOOD";
+    }
+
+    private boolean isClientAbort(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            String className = current.getClass().getName();
+            if (className.contains("ClientAbortException")) {
+                return true;
+            }
+
+            String message = current.getMessage();
+            if (message != null) {
+                String lower = message.toLowerCase();
+                if (lower.contains("broken pipe")
+                        || lower.contains("connection reset")
+                        || lower.contains("connection aborted")
+                        || lower.contains("was aborted")
+                        || lower.contains("forcibly closed")) {
+                    return true;
+                }
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private String rootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        String last = throwable.getMessage();
+        while (current != null) {
+            if (current.getMessage() != null && !current.getMessage().isBlank()) {
+                last = current.getMessage();
+            }
+            current = current.getCause();
+        }
+        return last == null ? throwable.getClass().getSimpleName() : last;
     }
 }

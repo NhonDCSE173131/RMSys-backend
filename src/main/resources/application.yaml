@@ -51,3 +51,5 @@ app:
     heartbeat-interval-ms: 15000
   aggregation:
     interval-ms: 60000
+  ingest:
+    api-key: ${APP_INGEST_API_KEY:}
