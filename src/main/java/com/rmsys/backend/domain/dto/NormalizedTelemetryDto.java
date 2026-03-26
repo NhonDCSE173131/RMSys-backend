@@ -1,46 +1,50 @@
 package com.rmsys.backend.domain.dto;
 
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
 import lombok.Builder;
+
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
 @Builder
 public record NormalizedTelemetryDto(
-        UUID machineId,
+        @NotNull UUID machineId,
         Instant ts,
         String connectionStatus,
         String machineState,
         String operationMode,
         String programName,
         Boolean cycleRunning,
-        Double powerKw,
-        Double temperatureC,
-        Double vibrationMmS,
-        Double runtimeHours,
-        Double cycleTimeSec,
-        Integer outputCount,
-        Integer goodCount,
-        Integer rejectCount,
-        Double spindleSpeedRpm,
-        Double feedRateMmMin,
+        @PositiveOrZero Double powerKw,
+        @PositiveOrZero Double temperatureC,
+        @PositiveOrZero Double vibrationMmS,
+        @PositiveOrZero Double runtimeHours,
+        @PositiveOrZero Double cycleTimeSec,
+        @PositiveOrZero Integer outputCount,
+        @PositiveOrZero Integer goodCount,
+        @PositiveOrZero Integer rejectCount,
+        @PositiveOrZero Double spindleSpeedRpm,
+        @PositiveOrZero Double feedRateMmMin,
         String toolCode,
-        Double remainingToolLifePct,
+        @DecimalMin("0.0") @DecimalMax("100.0") Double remainingToolLifePct,
         // Energy fields
-        Double voltageV,
-        Double currentA,
-        Double powerFactor,
-        Double frequencyHz,
-        Double energyKwhShift,
-        Double energyKwhDay,
+        @PositiveOrZero Double voltageV,
+        @PositiveOrZero Double currentA,
+        @DecimalMin("0.0") @DecimalMax("1.0") Double powerFactor,
+        @PositiveOrZero Double frequencyHz,
+        @PositiveOrZero Double energyKwhShift,
+        @PositiveOrZero Double energyKwhDay,
         // Maintenance fields
-        Double motorTemperatureC,
-        Double bearingTemperatureC,
-        Double cabinetTemperatureC,
-        Double servoOnHours,
-        Integer startStopCount,
-        Double lubricationLevelPct,
+        @PositiveOrZero Double motorTemperatureC,
+        @PositiveOrZero Double bearingTemperatureC,
+        @PositiveOrZero Double cabinetTemperatureC,
+        @PositiveOrZero Double servoOnHours,
+        @PositiveOrZero Integer startStopCount,
+        @DecimalMin("0.0") @DecimalMax("100.0") Double lubricationLevelPct,
         Boolean batteryLow,
         Map<String, Object> metadata
 ) {}
-

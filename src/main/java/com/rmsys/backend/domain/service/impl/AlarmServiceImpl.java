@@ -7,6 +7,7 @@ import com.rmsys.backend.common.response.PageResponse;
 import com.rmsys.backend.domain.entity.AlarmEventEntity;
 import com.rmsys.backend.domain.repository.AlarmEventRepository;
 import com.rmsys.backend.domain.service.AlarmService;
+import com.rmsys.backend.domain.service.AlarmLifecycleService;
 import com.rmsys.backend.infrastructure.realtime.SseEmitterRegistry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
@@ -19,7 +20,7 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
-public class AlarmServiceImpl implements AlarmService {
+public class AlarmServiceImpl implements AlarmService, AlarmLifecycleService {
 
     private final AlarmEventRepository alarmRepo;
     private final SseEmitterRegistry sseRegistry;
@@ -27,6 +28,39 @@ public class AlarmServiceImpl implements AlarmService {
     @Override
     public List<AlarmResponse> getActiveAlarms() {
         return alarmRepo.findByIsActiveTrueOrderByStartedAtDesc().stream().map(this::toResponse).toList();
+    }
+
+    @Override
+    public AlarmResponse getAlarmById(UUID alarmId) {
+        return alarmRepo.findById(alarmId)
+                .map(this::toResponse)
+                .orElseThrow(() -> AppException.notFound("Alarm", alarmId));
+    }
+
+    @Override
+    @Transactional
+    public void closeAlarmByCode(UUID machineId, String alarmCode) {
+        alarmRepo.findTopByMachineIdAndAlarmCodeAndIsActiveTrue(machineId, alarmCode)
+                .ifPresent(alarm -> {
+                    alarm.setIsActive(false);
+                    alarm.setEndedAt(Instant.now());
+                    alarmRepo.save(alarm);
+                    sseRegistry.broadcast("alarm-resolved", toResponse(alarm));
+                });
+    }
+
+    @Override
+    @Transactional
+    public void autoCloseStaleAlarms() {
+        var staleThreshold = Instant.now().minusSeconds(3600);
+        alarmRepo.findByIsActiveTrueOrderByStartedAtDesc().stream()
+                .filter(a -> a.getStartedAt().isBefore(staleThreshold))
+                .filter(a -> "NOISE".equals(a.getAlarmType()))
+                .forEach(alarm -> {
+                    alarm.setIsActive(false);
+                    alarm.setEndedAt(Instant.now());
+                    alarmRepo.save(alarm);
+                });
     }
 
     @Override

@@ -73,4 +73,13 @@ public class MachineTelemetryEntity {
 
     @Column(name = "metadata_json", length = 4000)
     private String metadataJson;
+
+    @Column(name = "quality_score")
+    private Double qualityScore;
+
+    @Column(name = "is_late_arrival")
+    private Boolean isLateArrival;
+
+    @Column(name = "source_sequence")
+    private Long sourceSequence;
 }

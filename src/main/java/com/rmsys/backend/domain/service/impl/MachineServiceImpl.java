@@ -11,6 +11,8 @@ import com.rmsys.backend.domain.service.MachineService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 
 @Service
@@ -61,9 +63,16 @@ public class MachineServiceImpl implements MachineService {
     }
 
     private MachineSnapshotResponse toSnapshot(MachineTelemetryEntity t, MachineEntity m) {
+        var now = Instant.now();
+        Long freshnessSec = m.getLastSeenAt() == null ? null : Duration.between(m.getLastSeenAt(), now).toSeconds();
+
         return MachineSnapshotResponse.builder()
                 .machineId(t.getMachineId()).machineCode(m.getCode()).machineName(m.getName())
                 .ts(t.getTs()).connectionStatus(t.getConnectionStatus())
+                .connectionState(m.getConnectionState())
+                .connectionUnstable(Boolean.TRUE.equals(m.getConnectionUnstable()))
+                .lastSeenAt(m.getLastSeenAt())
+                .dataFreshnessSec(freshnessSec)
                 .machineState(t.getMachineState()).operationMode(t.getOperationMode())
                 .programName(t.getProgramName()).cycleRunning(t.getCycleRunning())
                 .powerKw(t.getPowerKw()).temperatureC(t.getTemperatureC())
@@ -75,9 +84,18 @@ public class MachineServiceImpl implements MachineService {
     }
 
     private MachineSnapshotResponse emptySnapshot(MachineEntity m) {
+        var now = Instant.now();
+        Long freshnessSec = m.getLastSeenAt() == null ? null : Duration.between(m.getLastSeenAt(), now).toSeconds();
+
         return MachineSnapshotResponse.builder()
                 .machineId(m.getId()).machineCode(m.getCode()).machineName(m.getName())
-                .connectionStatus("OFFLINE").machineState("OFFLINE").build();
+                .connectionStatus("OFFLINE")
+                .connectionState(m.getConnectionState() != null ? m.getConnectionState() : "OFFLINE")
+                .connectionUnstable(Boolean.TRUE.equals(m.getConnectionUnstable()))
+                .lastSeenAt(m.getLastSeenAt())
+                .dataFreshnessSec(freshnessSec)
+                .machineState("OFFLINE")
+                .build();
     }
 }
 
