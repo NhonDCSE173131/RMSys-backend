@@ -2,7 +2,10 @@ package com.rmsys.backend.api.controller;
 
 import com.rmsys.backend.api.response.MachineDetailResponse;
 import com.rmsys.backend.api.response.MachineSnapshotResponse;
+import com.rmsys.backend.common.exception.AppException;
 import com.rmsys.backend.common.response.ApiResponse;
+import com.rmsys.backend.domain.entity.MachineEntity;
+import com.rmsys.backend.domain.repository.MachineRepository;
 import com.rmsys.backend.domain.service.MachineService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -19,6 +22,7 @@ import java.util.UUID;
 public class MachineController {
 
     private final MachineService machineService;
+    private final MachineRepository machineRepository;
 
     @GetMapping
     @Operation(summary = "List all machines")
@@ -28,20 +32,30 @@ public class MachineController {
 
     @GetMapping("/{machineId}")
     @Operation(summary = "Get machine detail")
-    public ApiResponse<MachineDetailResponse> detail(@PathVariable UUID machineId) {
-        return ApiResponse.ok(machineService.getMachineDetail(machineId));
+    public ApiResponse<MachineDetailResponse> detail(@PathVariable String machineId) {
+        return ApiResponse.ok(machineService.getMachineDetail(resolveMachineId(machineId)));
     }
 
     @GetMapping("/{machineId}/latest")
     @Operation(summary = "Get latest telemetry snapshot")
-    public ApiResponse<MachineSnapshotResponse> latest(@PathVariable UUID machineId) {
-        return ApiResponse.ok(machineService.getLatestSnapshot(machineId));
+    public ApiResponse<MachineSnapshotResponse> latest(@PathVariable String machineId) {
+        return ApiResponse.ok(machineService.getLatestSnapshot(resolveMachineId(machineId)));
     }
 
     @GetMapping("/snapshots")
     @Operation(summary = "Get latest snapshots for all machines")
     public ApiResponse<List<MachineSnapshotResponse>> allSnapshots() {
         return ApiResponse.ok(machineService.getAllLatestSnapshots());
+    }
+
+    private UUID resolveMachineId(String machineIdentifier) {
+        try {
+            return UUID.fromString(machineIdentifier);
+        } catch (IllegalArgumentException ignored) {
+            return machineRepository.findByCode(machineIdentifier)
+                    .map(MachineEntity::getId)
+                    .orElseThrow(() -> AppException.notFound("Machine", machineIdentifier));
+        }
     }
 }
 

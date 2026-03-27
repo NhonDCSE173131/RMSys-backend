@@ -3,8 +3,11 @@ package com.rmsys.backend.api.controller;
 import com.rmsys.backend.api.response.AlarmResponse;
 import com.rmsys.backend.api.response.DowntimeHistoryPointResponse;
 import com.rmsys.backend.api.response.TelemetrySeriesResponse;
+import com.rmsys.backend.common.exception.AppException;
 import com.rmsys.backend.common.response.ApiResponse;
 import com.rmsys.backend.common.response.PageResponse;
+import com.rmsys.backend.domain.entity.MachineEntity;
+import com.rmsys.backend.domain.repository.MachineRepository;
 import com.rmsys.backend.domain.service.AlarmService;
 import com.rmsys.backend.domain.service.DowntimeService;
 import com.rmsys.backend.domain.service.MachineService;
@@ -26,6 +29,7 @@ public class TelemetryHistoryController {
     private final MachineService machineService;
     private final AlarmService alarmService;
     private final DowntimeService downtimeService;
+    private final MachineRepository machineRepository;
 
     /**
      * Telemetry chart history with optional bucket aggregation.
@@ -40,12 +44,12 @@ public class TelemetryHistoryController {
     @GetMapping("/{machineId}/telemetry/history")
     @Operation(summary = "Get telemetry history for a machine (chart data)")
     public ApiResponse<TelemetrySeriesResponse> telemetryHistory(
-            @PathVariable UUID machineId,
+            @PathVariable String machineId,
             @RequestParam Instant from,
             @RequestParam Instant to,
             @RequestParam(required = false, defaultValue = "raw") String interval,
             @RequestParam(required = false, defaultValue = "avg") String aggregation) {
-        return ApiResponse.ok(machineService.getTelemetryHistory(machineId, from, to, interval, aggregation));
+        return ApiResponse.ok(machineService.getTelemetryHistory(resolveMachineId(machineId), from, to, interval, aggregation));
     }
 
     /**
@@ -54,12 +58,12 @@ public class TelemetryHistoryController {
     @GetMapping("/{machineId}/alarms/history")
     @Operation(summary = "Get alarm history for a specific machine")
     public ApiResponse<PageResponse<AlarmResponse>> alarmHistory(
-            @PathVariable UUID machineId,
+            @PathVariable String machineId,
             @RequestParam(required = false) Instant from,
             @RequestParam(required = false) Instant to,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return ApiResponse.ok(alarmService.getMachineAlarmHistory(machineId, from, to, PageRequest.of(page, size)));
+        return ApiResponse.ok(alarmService.getMachineAlarmHistory(resolveMachineId(machineId), from, to, PageRequest.of(page, size)));
     }
 
     /**
@@ -68,12 +72,22 @@ public class TelemetryHistoryController {
     @GetMapping("/{machineId}/downtime/history")
     @Operation(summary = "Get downtime history for a specific machine")
     public ApiResponse<PageResponse<DowntimeHistoryPointResponse>> downtimeHistory(
-            @PathVariable UUID machineId,
+            @PathVariable String machineId,
             @RequestParam(required = false) Instant from,
             @RequestParam(required = false) Instant to,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return ApiResponse.ok(downtimeService.getMachineDowntimeHistory(machineId, from, to, PageRequest.of(page, size)));
+        return ApiResponse.ok(downtimeService.getMachineDowntimeHistory(resolveMachineId(machineId), from, to, PageRequest.of(page, size)));
+    }
+
+    private UUID resolveMachineId(String machineIdentifier) {
+        try {
+            return UUID.fromString(machineIdentifier);
+        } catch (IllegalArgumentException ignored) {
+            return machineRepository.findByCode(machineIdentifier)
+                    .map(MachineEntity::getId)
+                    .orElseThrow(() -> AppException.notFound("Machine", machineIdentifier));
+        }
     }
 }
 
