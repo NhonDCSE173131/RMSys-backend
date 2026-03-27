@@ -1,5 +1,6 @@
 package com.rmsys.backend.api.request;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.DecimalMax;
@@ -17,6 +18,7 @@ import java.util.UUID;
 public record IngestTelemetryRequest(
         UUID machineId,
         String machineCode,
+        @JsonAlias("sourceTimestamp")
         Instant ts,
         String connectionStatus,
         String machineState,

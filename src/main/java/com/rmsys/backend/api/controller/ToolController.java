@@ -1,17 +1,13 @@
 package com.rmsys.backend.api.controller;
 
 import com.rmsys.backend.api.response.ToolOverviewResponse;
-import com.rmsys.backend.common.exception.AppException;
 import com.rmsys.backend.common.response.ApiResponse;
-import com.rmsys.backend.domain.entity.MachineEntity;
-import com.rmsys.backend.domain.repository.MachineRepository;
+import com.rmsys.backend.domain.service.MachineIdentityResolverService;
 import com.rmsys.backend.domain.service.ToolService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.UUID;
 
 @Tag(name = "Tools")
 @RestController
@@ -20,7 +16,7 @@ import java.util.UUID;
 public class ToolController {
 
     private final ToolService toolService;
-    private final MachineRepository machineRepository;
+    private final MachineIdentityResolverService machineIdentityResolverService;
 
     @GetMapping("/overview")
     @Operation(summary = "Get tools overview")
@@ -31,17 +27,7 @@ public class ToolController {
     @GetMapping("/machines/{machineId}")
     @Operation(summary = "Get tools for a machine")
     public ApiResponse<ToolOverviewResponse> byMachine(@PathVariable String machineId) {
-        return ApiResponse.ok(toolService.getByMachine(resolveMachineId(machineId)));
-    }
-
-    private UUID resolveMachineId(String machineIdentifier) {
-        try {
-            return UUID.fromString(machineIdentifier);
-        } catch (IllegalArgumentException ignored) {
-            return machineRepository.findByCode(machineIdentifier)
-                    .map(MachineEntity::getId)
-                    .orElseThrow(() -> AppException.notFound("Machine", machineIdentifier));
-        }
+        return ApiResponse.ok(toolService.getByMachine(machineIdentityResolverService.resolveRequiredId(machineId)));
     }
 }
 

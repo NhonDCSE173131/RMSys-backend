@@ -7,6 +7,7 @@ import com.rmsys.backend.domain.service.MaintenanceService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.ArrayList;
 
 @Service
@@ -23,6 +24,7 @@ public class MaintenanceServiceImpl implements MaintenanceService {
         var machines = machineRepo.findAll();
         var items = new ArrayList<MachineMaintenanceItem>();
         int dueSoon = 0;
+        int overdue = 0;
         double healthSum = 0;
         int healthCount = 0;
 
@@ -37,12 +39,14 @@ public class MaintenanceServiceImpl implements MaintenanceService {
 
             Double remaining = prediction.map(p -> p.getRemainingHoursToService()).orElse(null);
             if (remaining != null && remaining < 100) dueSoon++;
+            if (remaining != null && remaining < 0) overdue++;
 
             items.add(MachineMaintenanceItem.builder()
-                    .machineId(m.getId()).machineName(m.getName())
+                    .machineId(m.getId()).machineCode(m.getCode()).machineName(m.getName())
                     .runtimeHours(maint.map(mt -> mt.getRuntimeHours()).orElse(null))
                     .healthScore(score)
                     .riskLevel(health.map(h -> h.getRiskLevel()).orElse("LOW"))
+                    .reason(health.map(h -> h.getMainReason()).orElse(null))
                     .remainingHoursToService(remaining)
                     .nextMaintenanceDate(prediction.map(p -> p.getNextMaintenanceDate()).orElse(null))
                     .recommendedAction(prediction.map(p -> p.getRecommendedAction()).orElse(null))
@@ -50,8 +54,9 @@ public class MaintenanceServiceImpl implements MaintenanceService {
         }
 
         return MaintenanceOverviewResponse.builder()
-                .totalMachines(machines.size()).dueSoonCount(dueSoon)
+                .totalMachines(machines.size()).dueSoonCount(dueSoon).overdueCount(overdue)
                 .avgHealthScore(healthCount > 0 ? healthSum / healthCount : 0)
+                .lastUpdatedAt(Instant.now())
                 .machines(items).build();
     }
 }

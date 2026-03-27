@@ -10,10 +10,11 @@ public record SseEventEnvelope(
         String eventId,
         String eventType,
         UUID machineId,
+        String machineCode,
         Instant sourceTs,
         Instant receivedAt,
         Long sequence,
-        String quality,
+        Integer quality,
         Object payload
 ) {
     // Backward-compatible aliases used by existing tests.

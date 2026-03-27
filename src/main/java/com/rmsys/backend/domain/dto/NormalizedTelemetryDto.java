@@ -13,6 +13,7 @@ import java.util.UUID;
 @Builder
 public record NormalizedTelemetryDto(
         @NotNull UUID machineId,
+        String machineCode,
         Instant ts,
         String connectionStatus,
         String machineState,

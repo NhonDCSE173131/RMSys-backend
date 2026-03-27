@@ -9,11 +9,12 @@ public record OeeOverviewResponse(
         double avgPerformance,
         double avgQuality,
         double avgOee,
+        java.time.Instant lastUpdatedAt,
         java.util.List<MachineOeeItem> machines
 ) {
     @Builder
     public record MachineOeeItem(
-            UUID machineId, String machineName,
+            UUID machineId, String machineCode, String machineName, String areaCode,
             Double availability, Double performance, Double quality, Double oee
     ) {}
 }

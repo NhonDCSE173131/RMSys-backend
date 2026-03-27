@@ -46,7 +46,7 @@ public class ToolServiceImpl implements ToolService {
                 else if (remaining < 20) warning++;
 
                 items.add(ToolItem.builder()
-                        .machineId(mid).machineName(machine.getName())
+                        .machineId(mid).machineCode(machine.getCode()).machineName(machine.getName())
                         .toolCode(cat.getToolCode()).toolName(cat.getToolName())
                         .usageMinutes(latest.map(u -> u.getUsageMinutes()).orElse(null))
                         .usageCycles(latest.map(u -> u.getUsageCycles()).orElse(null))

@@ -7,6 +7,7 @@ import java.util.UUID;
 
 public interface MachineRepository extends JpaRepository<MachineEntity, UUID> {
     Optional<MachineEntity> findByCode(String code);
+    Optional<MachineEntity> findByCodeIgnoreCase(String code);
     long countByStatus(String status);
     long countByIsEnabledTrue();
 }

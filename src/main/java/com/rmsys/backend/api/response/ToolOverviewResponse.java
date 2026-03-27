@@ -12,7 +12,7 @@ public record ToolOverviewResponse(
 ) {
     @Builder
     public record ToolItem(
-            UUID machineId, String machineName, String toolCode, String toolName,
+            UUID machineId, String machineCode, String machineName, String toolCode, String toolName,
             Double usageMinutes, Integer usageCycles, Double remainingLifePct,
             String wearLevel, String riskLevel
     ) {}

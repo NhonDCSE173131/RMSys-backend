@@ -6,6 +6,7 @@ import com.rmsys.backend.common.exception.AppException;
 import com.rmsys.backend.common.response.PageResponse;
 import com.rmsys.backend.domain.entity.AlarmEventEntity;
 import com.rmsys.backend.domain.repository.AlarmEventRepository;
+import com.rmsys.backend.domain.repository.MachineRepository;
 import com.rmsys.backend.domain.service.AlarmService;
 import com.rmsys.backend.domain.service.AlarmLifecycleService;
 import com.rmsys.backend.infrastructure.realtime.SseEmitterRegistry;
@@ -23,6 +24,7 @@ import java.util.UUID;
 public class AlarmServiceImpl implements AlarmService, AlarmLifecycleService {
 
     private final AlarmEventRepository alarmRepo;
+    private final MachineRepository machineRepo;
     private final SseEmitterRegistry sseRegistry;
 
     @Override
@@ -95,8 +97,10 @@ public class AlarmServiceImpl implements AlarmService, AlarmLifecycleService {
     }
 
     private AlarmResponse toResponse(AlarmEventEntity e) {
+        String machineCode = machineRepo.findById(e.getMachineId()).map(m -> m.getCode()).orElse(null);
         return AlarmResponse.builder()
                 .id(e.getId()).machineId(e.getMachineId())
+                .machineCode(machineCode)
                 .alarmCode(e.getAlarmCode()).alarmType(e.getAlarmType())
                 .severity(e.getSeverity()).message(e.getMessage())
                 .startedAt(e.getStartedAt()).endedAt(e.getEndedAt())

@@ -6,6 +6,7 @@ import java.time.Instant;
 @Builder
 public record TelemetryHistoryPointResponse(
         Instant ts,
+        Instant bucketEnd,
         String machineState,
         String connectionStatus,
         Double powerKw,
@@ -19,6 +20,9 @@ public record TelemetryHistoryPointResponse(
         Double spindleSpeedRpm,
         Double feedRateMmMin,
         Double axisLoadPct,
-        Double qualityScore
+        Double qualityScore,
+        Integer sampleCount,
+        boolean missing,
+        boolean gapDetected
 ) {}
 

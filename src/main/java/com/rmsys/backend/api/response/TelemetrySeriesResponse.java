@@ -14,6 +14,7 @@ public record TelemetrySeriesResponse(
         Instant to,
         String interval,
         String aggregation,
+        List<String> requestedMetrics,
         int totalPoints,
         List<TelemetryHistoryPointResponse> points
 ) {}

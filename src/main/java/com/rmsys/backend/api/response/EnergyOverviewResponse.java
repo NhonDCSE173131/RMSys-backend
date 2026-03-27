@@ -8,14 +8,18 @@ import java.util.UUID;
 public record EnergyOverviewResponse(
         double totalPowerKw,
         double totalEnergyTodayKwh,
+        double totalEnergyMonthKwh,
         double avgPowerFactor,
+        double costToday,
+        double costMonth,
+        Instant lastUpdatedAt,
         java.util.List<MachineEnergyItem> machines
 ) {
     @Builder
     public record MachineEnergyItem(
-            UUID machineId, String machineName,
+            UUID machineId, String machineCode, String machineName, String areaCode,
             Double powerKw, Double voltageV, Double currentA,
-            Double powerFactor, Double energyKwhDay
+            Double powerFactor, Double energyKwhDay, Double energyKwhMonth
     ) {}
 }
 

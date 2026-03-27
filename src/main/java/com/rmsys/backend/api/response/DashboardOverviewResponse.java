@@ -7,15 +7,34 @@ import java.util.List;
 public record DashboardOverviewResponse(
         int totalMachines,
         int onlineMachines,
+        int offlineMachines,
         int runningMachines,
+        int idleMachines,
+        int faultMachines,
         long criticalAlarms,
+        long warningAlarms,
         double plantPowerKw,
         double todayEnergyKwh,
         double todayOee,
         long abnormalStops,
-        List<RiskMachineItem> topRiskMachines
+        long totalProduction,
+        long totalGood,
+        long totalReject,
+        List<RiskMachineItem> topRiskMachines,
+        List<AreaSummaryItem> areaSummaries,
+        java.time.Instant lastUpdatedAt
 ) {
     @Builder
-    public record RiskMachineItem(String machineId, String machineName, String riskLevel, String reason) {}
+    public record RiskMachineItem(java.util.UUID machineId, String machineCode, String machineName, String riskLevel, String reason) {}
+
+    @Builder
+    public record AreaSummaryItem(
+            String areaCode,
+            int totalMachines,
+            int onlineMachines,
+            double powerKw,
+            double energyTodayKwh,
+            double avgOee
+    ) {}
 }
 

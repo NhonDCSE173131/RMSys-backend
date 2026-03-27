@@ -175,7 +175,7 @@ public class ExportServiceImpl implements ExportService {
                 .format(s.format)
                 .createdAt(s.createdAt)
                 .completedAt(s.completedAt)
-                .downloadUrl("COMPLETED".equals(s.status) ? "/api/v1/exports/" + s.jobId + "/download" : null)
+                .downloadUrl("COMPLETED".equals(s.status) ? "/api/v1/export/jobs/" + s.jobId + "/download" : null)
                 .errorMessage(s.errorMessage)
                 .totalRows(s.totalRows)
                 .build();

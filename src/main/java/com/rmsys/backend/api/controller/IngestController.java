@@ -8,8 +8,8 @@ import com.rmsys.backend.common.exception.AppException;
 import com.rmsys.backend.domain.dto.NormalizedAlarmDto;
 import com.rmsys.backend.domain.dto.NormalizedDowntimeDto;
 import com.rmsys.backend.domain.dto.NormalizedTelemetryDto;
-import com.rmsys.backend.domain.repository.MachineRepository;
 import com.rmsys.backend.domain.service.IngestService;
+import com.rmsys.backend.domain.service.MachineIdentityResolverService;
 import com.rmsys.backend.domain.service.MachineConnectionStateService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -32,7 +32,7 @@ import java.util.LinkedHashMap;
 public class IngestController {
 
     private final IngestService ingestService;
-    private final MachineRepository machineRepository;
+    private final MachineIdentityResolverService machineIdentityResolverService;
     private final MachineConnectionStateService connectionStateService;
 
     @Value("${app.ingest.api-key:}")
@@ -55,10 +55,9 @@ public class IngestController {
             @Valid @RequestBody IngestTelemetryByCodeRequest request) {
         validateIngestKey(ingestKey);
 
-        var machine = machineRepository.findByCode(request.machineCode())
-                .orElseThrow(() -> AppException.notFound("Machine", request.machineCode()));
+        var machine = machineIdentityResolverService.resolveRequired((java.util.UUID) null, request.machineCode());
 
-        ingestService.ingestTelemetry(toTelemetryDto(machine.getId(), request));
+        ingestService.ingestTelemetry(toTelemetryDto(machine, request));
         return ApiResponse.ok(null, "Telemetry ingested");
     }
 
@@ -89,11 +88,7 @@ public class IngestController {
             @Valid @RequestBody IngestConnectionStatusRequest request) {
         validateIngestKey(ingestKey);
 
-        var machine = request.machineId() != null
-                ? machineRepository.findById(request.machineId())
-                    .orElseThrow(() -> AppException.notFound("Machine", request.machineId()))
-                : machineRepository.findByCode(request.machineCode())
-                    .orElseThrow(() -> AppException.notFound("Machine", request.machineCode()));
+        var machine = machineIdentityResolverService.resolveRequired(request.machineId(), request.machineCode());
 
         connectionStateService.markConnectionReported(
                 machine,
@@ -114,16 +109,10 @@ public class IngestController {
     }
 
     private NormalizedTelemetryDto toTelemetryDto(IngestTelemetryRequest request) {
-        var machineId = request.machineId() != null
-                ? request.machineId()
-                : machineRepository.findByCode(request.machineCode())
-                    .orElseThrow(() -> AppException.notFound("Machine", request.machineCode()))
-                    .getId();
-
-        return toTelemetryDto(machineId, request);
+        return toTelemetryDto(machineIdentityResolverService.resolveRequired(request.machineId(), request.machineCode()), request);
     }
 
-    private NormalizedTelemetryDto toTelemetryDto(java.util.UUID machineId, IngestTelemetryRequest request) {
+    private NormalizedTelemetryDto toTelemetryDto(com.rmsys.backend.domain.entity.MachineEntity machine, IngestTelemetryRequest request) {
         Integer outputCount = firstNonNull(request.outputCount(), request.partCount(), request.cycleCount());
         Integer goodCount = firstNonNull(request.goodCount(), request.partCount());
         Boolean cycleRunning = request.cycleRunning() != null
@@ -154,7 +143,8 @@ public class IngestController {
         }
 
         return NormalizedTelemetryDto.builder()
-                .machineId(machineId)
+                .machineId(machine.getId())
+                .machineCode(machine.getCode())
                 .ts(request.ts())
                 .connectionStatus(request.connectionStatus())
                 .machineState(request.machineState())
@@ -190,10 +180,10 @@ public class IngestController {
                 .build();
     }
 
-    private NormalizedTelemetryDto toTelemetryDto(java.util.UUID machineId, IngestTelemetryByCodeRequest request) {
-        return toTelemetryDto(machineId, IngestTelemetryRequest.builder()
-                .machineId(machineId)
-                .machineCode(request.machineCode())
+    private NormalizedTelemetryDto toTelemetryDto(com.rmsys.backend.domain.entity.MachineEntity machine, IngestTelemetryByCodeRequest request) {
+        return toTelemetryDto(machine, IngestTelemetryRequest.builder()
+                .machineId(machine.getId())
+                .machineCode(machine.getCode())
                 .ts(request.ts())
                 .connectionStatus(request.connectionStatus())
                 .machineState(request.machineState())

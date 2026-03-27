@@ -8,13 +8,16 @@ import java.util.UUID;
 public record MaintenanceOverviewResponse(
         int totalMachines,
         int dueSoonCount,
+        int overdueCount,
         double avgHealthScore,
+        Instant lastUpdatedAt,
         java.util.List<MachineMaintenanceItem> machines
 ) {
     @Builder
     public record MachineMaintenanceItem(
-            UUID machineId, String machineName,
+            UUID machineId, String machineCode, String machineName,
             Double runtimeHours, Double healthScore, String riskLevel,
+            String reason,
             Double remainingHoursToService, Instant nextMaintenanceDate, String recommendedAction
     ) {}
 }

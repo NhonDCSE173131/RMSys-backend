@@ -8,6 +8,7 @@ import java.util.UUID;
 public record DowntimeHistoryPointResponse(
         UUID id,
         UUID machineId,
+        String machineCode,
         String reasonCode,
         String reasonGroup,
         Instant startedAt,

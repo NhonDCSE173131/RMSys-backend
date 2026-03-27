@@ -2,13 +2,20 @@ package com.rmsys.backend.domain.service.impl;
 
 import com.rmsys.backend.api.response.MachineDetailResponse;
 import com.rmsys.backend.api.response.MachineSnapshotResponse;
+import com.rmsys.backend.api.response.MachineSummaryResponse;
 import com.rmsys.backend.api.response.TelemetryHistoryPointResponse;
 import com.rmsys.backend.api.response.TelemetrySeriesResponse;
 import com.rmsys.backend.common.exception.AppException;
 import com.rmsys.backend.domain.entity.MachineEntity;
 import com.rmsys.backend.domain.entity.MachineTelemetryEntity;
+import com.rmsys.backend.domain.repository.AlarmEventRepository;
+import com.rmsys.backend.domain.repository.DowntimeEventRepository;
+import com.rmsys.backend.domain.repository.MachineHealthSnapshotRepository;
+import com.rmsys.backend.domain.repository.MaintenancePredictionRepository;
 import com.rmsys.backend.domain.repository.MachineRepository;
 import com.rmsys.backend.domain.repository.MachineTelemetryRepository;
+import com.rmsys.backend.domain.repository.OeeSnapshotRepository;
+import com.rmsys.backend.domain.repository.ToolUsageTelemetryRepository;
 import com.rmsys.backend.domain.service.MachineService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -33,6 +40,12 @@ public class MachineServiceImpl implements MachineService {
 
     private final MachineRepository machineRepo;
     private final MachineTelemetryRepository telemetryRepo;
+    private final AlarmEventRepository alarmRepo;
+    private final DowntimeEventRepository downtimeRepo;
+    private final OeeSnapshotRepository oeeRepo;
+    private final MachineHealthSnapshotRepository healthRepo;
+    private final MaintenancePredictionRepository maintenancePredictionRepo;
+    private final ToolUsageTelemetryRepository toolUsageRepo;
 
     @Override
     public List<MachineDetailResponse> getAllMachines() {
@@ -53,6 +66,53 @@ public class MachineServiceImpl implements MachineService {
     }
 
     @Override
+    public MachineSummaryResponse getMachineSummary(UUID machineId) {
+        var machine = findMachine(machineId);
+        var latestSnapshot = getLatestSnapshot(machineId);
+
+        long activeAlarms = alarmRepo.findByMachineIdAndIsActiveTrueOrderByStartedAtDesc(machineId).size();
+        long alarmHistoryCount = alarmRepo.findByMachineIdAndStartedAtBetween(
+                machineId,
+                Instant.now().minus(Duration.ofDays(30)),
+                Instant.now()).size();
+
+        var downtimes = downtimeRepo.findByMachineIdOrderByStartedAtDesc(machineId);
+        long activeDowntimes = downtimes.stream().filter(d -> d.getEndedAt() == null).count();
+        long abnormalStopsToday = downtimes.stream()
+                .filter(d -> Boolean.TRUE.equals(d.getAbnormalStop()))
+                .filter(d -> d.getStartedAt() != null && d.getStartedAt().isAfter(Instant.now().minus(Duration.ofDays(1))))
+                .count();
+
+        var latestOee = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(machineId, "HOUR");
+        var latestHealth = healthRepo.findFirstByMachineIdOrderByBucketStartDesc(machineId);
+        var prediction = maintenancePredictionRepo.findFirstByMachineIdOrderByTsDesc(machineId);
+        var latestTool = toolUsageRepo.findByMachineIdOrderByTsDesc(machineId).stream().findFirst();
+
+        return MachineSummaryResponse.builder()
+                .machineId(machine.getId())
+                .machineCode(machine.getCode())
+                .machineName(machine.getName())
+                .latestSnapshot(latestSnapshot)
+                .activeAlarms(activeAlarms)
+                .alarmHistoryCount(alarmHistoryCount)
+                .activeDowntimes(activeDowntimes)
+                .abnormalStopsToday(abnormalStopsToday)
+                .availability(latestOee.map(o -> o.getAvailability()).orElse(null))
+                .performance(latestOee.map(o -> o.getPerformance()).orElse(null))
+                .quality(latestOee.map(o -> o.getQuality()).orElse(null))
+                .latestOee(latestOee.map(o -> o.getOee()).orElse(null))
+                .healthScore(latestHealth.map(h -> h.getHealthScore()).orElse(null))
+                .riskLevel(latestHealth.map(h -> h.getRiskLevel()).orElse(null))
+                .riskReason(latestHealth.map(h -> h.getMainReason()).orElse(null))
+                .remainingHoursToService(prediction.map(p -> p.getRemainingHoursToService()).orElse(null))
+                .nextMaintenanceDate(prediction.map(p -> p.getNextMaintenanceDate()).orElse(null))
+                .toolCode(latestTool.map(t -> t.getToolCode()).orElse(null))
+                .remainingToolLifePct(latestTool.map(t -> t.getRemainingLifePct()).orElse(null))
+                .lastUpdatedAt(Instant.now())
+                .build();
+    }
+
+    @Override
     public List<MachineSnapshotResponse> getAllLatestSnapshots() {
         var machines = machineRepo.findAll().stream()
                 .collect(Collectors.toMap(MachineEntity::getId, m -> m));
@@ -62,16 +122,20 @@ public class MachineServiceImpl implements MachineService {
     }
 
     @Override
-    public TelemetrySeriesResponse getTelemetryHistory(UUID machineId, Instant from, Instant to, String interval, String aggregation) {
+    public TelemetrySeriesResponse getTelemetryHistory(UUID machineId, Instant from, Instant to, String interval, String aggregation, List<String> metrics) {
         var machine = findMachine(machineId);
         var rawDesc = telemetryRepo.findByMachineIdAndTsBetweenOrderByTsDesc(machineId, from, to);
         var ascending = new ArrayList<>(rawDesc);
         Collections.reverse(ascending);
 
         String resolvedAgg = (aggregation != null && !aggregation.isBlank()) ? aggregation : "avg";
+        var requestedMetrics = normalizeMetrics(metrics);
 
         if (interval == null || interval.isBlank() || "raw".equalsIgnoreCase(interval)) {
-            var points = ascending.stream().map(this::toHistoryPoint).toList();
+            var points = ascending.stream()
+                    .map(this::toHistoryPoint)
+                    .map(point -> filterMetrics(point, requestedMetrics))
+                    .toList();
             return TelemetrySeriesResponse.builder()
                     .machineId(machineId)
                     .machineCode(machine.getCode())
@@ -80,13 +144,16 @@ public class MachineServiceImpl implements MachineService {
                     .to(to)
                     .interval("raw")
                     .aggregation("none")
+                    .requestedMetrics(requestedMetrics)
                     .totalPoints(points.size())
                     .points(points)
                     .build();
         }
 
         Duration bucketDuration = parseInterval(interval);
-        var points = bucket(ascending, from, bucketDuration, resolvedAgg);
+        var points = bucket(ascending, from, bucketDuration, resolvedAgg).stream()
+                .map(point -> filterMetrics(point, requestedMetrics))
+                .toList();
         return TelemetrySeriesResponse.builder()
                 .machineId(machineId)
                 .machineCode(machine.getCode())
@@ -95,6 +162,7 @@ public class MachineServiceImpl implements MachineService {
                 .to(to)
                 .interval(interval)
                 .aggregation(resolvedAgg)
+                .requestedMetrics(requestedMetrics)
                 .totalPoints(points.size())
                 .points(points)
                 .build();
@@ -107,6 +175,7 @@ public class MachineServiceImpl implements MachineService {
     private TelemetryHistoryPointResponse toHistoryPoint(MachineTelemetryEntity t) {
         return TelemetryHistoryPointResponse.builder()
                 .ts(t.getTs())
+                .bucketEnd(t.getTs())
                 .machineState(t.getMachineState())
                 .connectionStatus(t.getConnectionStatus())
                 .powerKw(t.getPowerKw())
@@ -121,6 +190,7 @@ public class MachineServiceImpl implements MachineService {
                 .feedRateMmMin(t.getFeedRateMmMin())
                 .axisLoadPct(t.getAxisLoadPct())
                 .qualityScore(t.getQualityScore())
+                .sampleCount(1)
                 .build();
     }
 
@@ -149,12 +219,19 @@ public class MachineServiceImpl implements MachineService {
 
     private TelemetryHistoryPointResponse aggregate(Instant bucketTs, List<MachineTelemetryEntity> points, String agg) {
         if (points.isEmpty()) {
-            return TelemetryHistoryPointResponse.builder().ts(bucketTs).build();
+            return TelemetryHistoryPointResponse.builder()
+                    .ts(bucketTs)
+                    .bucketEnd(bucketTs)
+                    .sampleCount(0)
+                    .missing(true)
+                    .gapDetected(true)
+                    .build();
         }
         var last = points.get(points.size() - 1);
         if ("last".equalsIgnoreCase(agg)) {
             return TelemetryHistoryPointResponse.builder()
                     .ts(bucketTs)
+                    .bucketEnd(last.getTs())
                     .machineState(last.getMachineState())
                     .connectionStatus(last.getConnectionStatus())
                     .powerKw(last.getPowerKw())
@@ -169,11 +246,15 @@ public class MachineServiceImpl implements MachineService {
                     .feedRateMmMin(last.getFeedRateMmMin())
                     .axisLoadPct(last.getAxisLoadPct())
                     .qualityScore(last.getQualityScore())
+                    .sampleCount(points.size())
+                    .missing(false)
+                    .gapDetected(false)
                     .build();
         }
 
         return TelemetryHistoryPointResponse.builder()
                 .ts(bucketTs)
+                .bucketEnd(last.getTs())
                 .machineState(last.getMachineState())
                 .connectionStatus(last.getConnectionStatus())
                 .powerKw(numericAgg(points, MachineTelemetryEntity::getPowerKw, agg))
@@ -188,6 +269,9 @@ public class MachineServiceImpl implements MachineService {
                 .feedRateMmMin(numericAgg(points, MachineTelemetryEntity::getFeedRateMmMin, agg))
                 .axisLoadPct(numericAgg(points, MachineTelemetryEntity::getAxisLoadPct, agg))
                 .qualityScore(numericAgg(points, MachineTelemetryEntity::getQualityScore, agg))
+                .sampleCount(points.size())
+                .missing(false)
+                .gapDetected(false)
                 .build();
     }
 
@@ -226,6 +310,51 @@ public class MachineServiceImpl implements MachineService {
             case "1d" -> Duration.ofDays(1);
             default -> Duration.ofMinutes(1);
         };
+    }
+
+    private List<String> normalizeMetrics(List<String> metrics) {
+        if (metrics == null) {
+            return List.of();
+        }
+        return metrics.stream()
+                .filter(Objects::nonNull)
+                .flatMap(metric -> java.util.Arrays.stream(metric.split(",")))
+                .map(String::trim)
+                .filter(metric -> !metric.isBlank())
+                .distinct()
+                .toList();
+    }
+
+    private TelemetryHistoryPointResponse filterMetrics(TelemetryHistoryPointResponse point, List<String> requestedMetrics) {
+        if (requestedMetrics == null || requestedMetrics.isEmpty()) {
+            return point;
+        }
+
+        var selected = requestedMetrics.stream()
+                .map(String::toLowerCase)
+                .collect(Collectors.toSet());
+
+        return TelemetryHistoryPointResponse.builder()
+                .ts(point.ts())
+                .bucketEnd(point.bucketEnd())
+                .machineState(point.machineState())
+                .connectionStatus(point.connectionStatus())
+                .powerKw(selected.contains("powerkw") ? point.powerKw() : null)
+                .temperatureC(selected.contains("temperaturec") ? point.temperatureC() : null)
+                .vibrationMmS(selected.contains("vibrationmms") ? point.vibrationMmS() : null)
+                .runtimeHours(selected.contains("runtimehours") ? point.runtimeHours() : null)
+                .cycleTimeSec(selected.contains("cycletimesec") ? point.cycleTimeSec() : null)
+                .outputCount(selected.contains("outputcount") ? point.outputCount() : null)
+                .goodCount(selected.contains("goodcount") ? point.goodCount() : null)
+                .rejectCount(selected.contains("rejectcount") ? point.rejectCount() : null)
+                .spindleSpeedRpm(selected.contains("spindlespeedrpm") ? point.spindleSpeedRpm() : null)
+                .feedRateMmMin(selected.contains("feedratemmmin") ? point.feedRateMmMin() : null)
+                .axisLoadPct(selected.contains("axisloadpct") ? point.axisLoadPct() : null)
+                .qualityScore(point.qualityScore())
+                .sampleCount(point.sampleCount())
+                .missing(point.missing())
+                .gapDetected(point.gapDetected())
+                .build();
     }
 
     private MachineDetailResponse toDetail(MachineEntity m) {

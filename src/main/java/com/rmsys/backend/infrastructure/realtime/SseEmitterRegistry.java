@@ -75,7 +75,7 @@ public class SseEmitterRegistry {
                 if (subscription.matches(envelope.eventType(), envelope.machineId())) {
                     subscription.emitter().send(SseEmitter.event()
                             .id(envelope.eventId())
-                            .name(eventName)
+                            .name(envelope.eventType())
                             .data(envelope));
                 }
             } catch (Exception ex) {
@@ -102,6 +102,7 @@ public class SseEmitterRegistry {
                 .eventId("evt-" + nextSequence)
                 .eventType(toEventType(eventName))
                 .machineId(extractMachineId(data))
+                .machineCode(extractMachineCode(data))
                 .sourceTs(extractSourceTs(data, now))
                 .receivedAt(now)
                 .sequence(nextSequence)
@@ -171,8 +172,32 @@ public class SseEmitterRegistry {
         return Arrays.stream(topics.split(","))
                 .map(String::trim)
                 .map(String::toLowerCase)
+                .map(this::normalizeTopicAlias)
                 .filter(s -> !s.isBlank())
                 .collect(java.util.stream.Collectors.toCollection(HashSet::new));
+    }
+
+    private String normalizeTopicAlias(String topic) {
+        if (topic == null || topic.isBlank()) {
+            return "";
+        }
+        String normalized = topic.toLowerCase().replace('_', '.').replace('-', '.');
+        if ("machine.telemetry.updated".equals(normalized) || "telemetry.updated".equals(normalized)) {
+            return "telemetry";
+        }
+        if (normalized.startsWith("alarm.")) {
+            return "alarm";
+        }
+        if (normalized.startsWith("machine.connection.")) {
+            return "machine.connection";
+        }
+        if (normalized.startsWith("downtime.")) {
+            return "downtime";
+        }
+        if (normalized.startsWith("heartbeat")) {
+            return "heartbeat";
+        }
+        return normalized;
     }
 
     private long parseEventId(String eventId) {
@@ -214,6 +239,21 @@ public class SseEmitterRegistry {
             return null;
         }
 
+        if (data instanceof Map<?, ?> map) {
+            Object machineId = map.get("machineId");
+            if (machineId instanceof UUID uuid) {
+                return uuid;
+            }
+            if (machineId instanceof String value) {
+                try {
+                    return UUID.fromString(value);
+                } catch (IllegalArgumentException ignored) {
+                    return null;
+                }
+            }
+            return null;
+        }
+
         if (data instanceof UUID uuid) {
             return uuid;
         }
@@ -241,6 +281,33 @@ public class SseEmitterRegistry {
         return null;
     }
 
+    private String extractMachineCode(Object data) {
+        if (data == null) {
+            return null;
+        }
+
+        if (data instanceof Map<?, ?> map) {
+            Object machineCode = map.get("machineCode");
+            return machineCode == null ? null : machineCode.toString();
+        }
+
+        try {
+            var method = data.getClass().getMethod("machineCode");
+            var result = method.invoke(data);
+            return result == null ? null : result.toString();
+        } catch (ReflectiveOperationException ignored) {
+            // fall through to getter naming style
+        }
+
+        try {
+            var method = data.getClass().getMethod("getMachineCode");
+            var result = method.invoke(data);
+            return result == null ? null : result.toString();
+        } catch (ReflectiveOperationException ignored) {
+            return null;
+        }
+    }
+
     private Instant extractSourceTs(Object data, Instant fallback) {
         if (data == null) {
             return fallback;
@@ -258,20 +325,50 @@ public class SseEmitterRegistry {
         return fallback;
     }
 
-    private String extractQuality(Object data) {
+    private Integer extractQuality(Object data) {
         if (data == null) {
-            return "UNKNOWN";
+            return 0;
         }
+
+        if (data instanceof Map<?, ?> map) {
+            return normalizeQuality(map.get("quality"));
+        }
+
         try {
             var method = data.getClass().getMethod("quality");
             var result = method.invoke(data);
-            if (result != null) {
-                return result.toString();
-            }
+            return normalizeQuality(result);
         } catch (ReflectiveOperationException ignored) {
             // fallback below
         }
-        return "GOOD";
+        return 100;
+    }
+
+    private Integer normalizeQuality(Object value) {
+        if (value == null) {
+            return 100;
+        }
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+
+        String normalized = value.toString().trim();
+        if (normalized.isEmpty()) {
+            return 100;
+        }
+
+        try {
+            return Integer.parseInt(normalized);
+        } catch (NumberFormatException ignored) {
+            String mapped = normalized.toUpperCase();
+            return switch (mapped) {
+                case "GOOD" -> 100;
+                case "DEGRADED", "WARN", "WARNING" -> 60;
+                case "BAD", "POOR" -> 30;
+                case "UNKNOWN" -> 0;
+                default -> 100;
+            };
+        }
     }
 
     private boolean isClientAbort(Throwable throwable) {

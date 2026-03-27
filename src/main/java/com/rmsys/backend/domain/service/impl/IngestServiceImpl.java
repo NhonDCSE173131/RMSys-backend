@@ -23,7 +23,6 @@ import com.rmsys.backend.domain.repository.ToolUsageTelemetryRepository;
 import com.rmsys.backend.domain.service.IngestService;
 import com.rmsys.backend.domain.service.MachineConnectionStateService;
 import com.rmsys.backend.domain.service.TelemetryQualityService;
-import com.rmsys.backend.domain.service.AlarmLifecycleService;
 import com.rmsys.backend.domain.service.RuleEngineService;
 import com.rmsys.backend.infrastructure.realtime.SseEmitterRegistry;
 import lombok.RequiredArgsConstructor;
@@ -58,13 +57,15 @@ public class IngestServiceImpl implements IngestService {
         var machine = machineRepo.findById(dto.machineId())
                 .orElseThrow(() -> AppException.notFound("Machine", dto.machineId()));
 
-        var ts = resolveTimestamp(dto);
+        var normalizedDto = enrichMachineIdentity(dto, machine);
+
+        var ts = resolveTimestamp(normalizedDto);
         var receivedAt = Instant.now();
-        var fingerprint = fingerprint(dto, ts);
-        var qualityScore = qualityService.scoreQuality(dto);
+        var fingerprint = fingerprint(normalizedDto, ts);
+        var qualityScore = qualityService.scoreQuality(normalizedDto);
         boolean duplicate = isDuplicate(machine, ts, fingerprint);
         boolean outOfOrder = isOutOfOrder(machine, ts);
-        boolean suspicious = qualityService.isSuspicious(dto);
+        boolean suspicious = qualityService.isSuspicious(normalizedDto);
 
         if (duplicate) {
             connectionStateService.markTelemetryReceived(machine, ts, receivedAt, fingerprint, false);
@@ -72,16 +73,16 @@ public class IngestServiceImpl implements IngestService {
             return;
         }
 
-        saveMachineTelemetry(dto, ts, receivedAt, outOfOrder, qualityScore);
-        saveEnergyTelemetryIfPresent(dto, ts);
-        saveMaintenanceTelemetryIfPresent(dto, ts);
-        saveToolUsageIfPresent(dto, ts);
+        saveMachineTelemetry(normalizedDto, ts, receivedAt, outOfOrder, qualityScore);
+        saveEnergyTelemetryIfPresent(normalizedDto, ts);
+        saveMaintenanceTelemetryIfPresent(normalizedDto, ts);
+        saveToolUsageIfPresent(normalizedDto, ts);
         connectionStateService.markTelemetryReceived(machine, ts, receivedAt, fingerprint, !outOfOrder);
 
         if (!outOfOrder) {
-            updateMachineStatus(machine, dto);
-            ruleEngine.evaluate(dto);
-            publishTelemetryEvent(dto);
+            updateMachineStatus(machine, normalizedDto);
+            ruleEngine.evaluate(normalizedDto);
+            publishTelemetryEvent(normalizedDto);
         } else {
             log.debug("Out-of-order telemetry kept for history only. machine={}, sourceTs={}, latestAccepted={}",
                     machine.getId(), ts, machine.getLatestAcceptedSourceTs());
@@ -258,6 +259,49 @@ public class IngestServiceImpl implements IngestService {
                 dto.temperatureC(),
                 dto.vibrationMmS(),
                 dto.outputCount());
+    }
+
+    private NormalizedTelemetryDto enrichMachineIdentity(NormalizedTelemetryDto dto, MachineEntity machine) {
+        if (dto.machineCode() != null && dto.machineCode().equalsIgnoreCase(machine.getCode())) {
+            return dto;
+        }
+
+        return NormalizedTelemetryDto.builder()
+                .machineId(dto.machineId())
+                .machineCode(machine.getCode())
+                .ts(dto.ts())
+                .connectionStatus(dto.connectionStatus())
+                .machineState(dto.machineState())
+                .operationMode(dto.operationMode())
+                .programName(dto.programName())
+                .cycleRunning(dto.cycleRunning())
+                .powerKw(dto.powerKw())
+                .temperatureC(dto.temperatureC())
+                .vibrationMmS(dto.vibrationMmS())
+                .runtimeHours(dto.runtimeHours())
+                .cycleTimeSec(dto.cycleTimeSec())
+                .outputCount(dto.outputCount())
+                .goodCount(dto.goodCount())
+                .rejectCount(dto.rejectCount())
+                .spindleSpeedRpm(dto.spindleSpeedRpm())
+                .feedRateMmMin(dto.feedRateMmMin())
+                .toolCode(dto.toolCode())
+                .remainingToolLifePct(dto.remainingToolLifePct())
+                .voltageV(dto.voltageV())
+                .currentA(dto.currentA())
+                .powerFactor(dto.powerFactor())
+                .frequencyHz(dto.frequencyHz())
+                .energyKwhShift(dto.energyKwhShift())
+                .energyKwhDay(dto.energyKwhDay())
+                .motorTemperatureC(dto.motorTemperatureC())
+                .bearingTemperatureC(dto.bearingTemperatureC())
+                .cabinetTemperatureC(dto.cabinetTemperatureC())
+                .servoOnHours(dto.servoOnHours())
+                .startStopCount(dto.startStopCount())
+                .lubricationLevelPct(dto.lubricationLevelPct())
+                .batteryLow(dto.batteryLow())
+                .metadata(dto.metadata())
+                .build();
     }
 
     private String toJson(HashMap<String, Object> metadata) {

@@ -4,8 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rmsys.backend.common.exception.GlobalExceptionHandler;
 import com.rmsys.backend.domain.dto.NormalizedTelemetryDto;
 import com.rmsys.backend.domain.entity.MachineEntity;
-import com.rmsys.backend.domain.repository.MachineRepository;
 import com.rmsys.backend.domain.service.IngestService;
+import com.rmsys.backend.domain.service.MachineIdentityResolverService;
 import com.rmsys.backend.domain.service.MachineConnectionStateService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -17,13 +17,14 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.TestPropertySource;
 
-import java.util.Optional;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.Mockito.times;
@@ -48,15 +49,19 @@ class IngestControllerTest {
     private IngestService ingestService;
 
     @MockitoBean
-    private MachineRepository machineRepository;
+    private MachineIdentityResolverService machineIdentityResolverService;
 
     @MockitoBean
     private MachineConnectionStateService connectionStateService;
 
     @Test
     void ingestTelemetry_validPayload_returnsOk() throws Exception {
+        var machineId = UUID.randomUUID();
+        var machine = baseMachine(machineId, "M-001");
+        when(machineIdentityResolverService.resolveRequired(eq(machineId), isNull())).thenReturn(machine);
+
         var payload = Map.of(
-                "machineId", UUID.randomUUID().toString(),
+                "machineId", machineId.toString(),
                 "temperatureC", 45.0,
                 "vibrationMmS", 2.1
         );
@@ -73,15 +78,8 @@ class IngestControllerTest {
     @Test
     void ingestTelemetry_withSimulatorPayloadByMachineCode_returnsOkAndMapsCompatibilityFields() throws Exception {
         var machineId = UUID.randomUUID();
-        var machine = MachineEntity.builder()
-                .id(machineId)
-                .code("CNC-01")
-                .name("Machine 01")
-                .type("CNC")
-                .vendor("TEST")
-                .status("IDLE")
-                .build();
-        when(machineRepository.findByCode("CNC-01")).thenReturn(Optional.of(machine));
+        var machine = baseMachine(machineId, "CNC-01");
+        when(machineIdentityResolverService.resolveRequired(isNull(), eq("CNC-01"))).thenReturn(machine);
 
         var payload = new LinkedHashMap<String, Object>();
         payload.put("machineCode", "CNC-01");
@@ -108,7 +106,7 @@ class IngestControllerTest {
                 .andExpect(jsonPath("$.success").value(true));
 
         var captor = ArgumentCaptor.forClass(NormalizedTelemetryDto.class);
-        verify(machineRepository, times(1)).findByCode("CNC-01");
+        verify(machineIdentityResolverService, times(1)).resolveRequired(isNull(), eq("CNC-01"));
         verify(ingestService, times(1)).ingestTelemetry(captor.capture());
 
         var dto = captor.getValue();
@@ -142,15 +140,8 @@ class IngestControllerTest {
     @Test
     void ingestTelemetryByCode_validPayload_resolvesMachineAndCallsService() throws Exception {
         var machineId = UUID.randomUUID();
-        var machine = MachineEntity.builder()
-                .id(machineId)
-                .code("CNC-01")
-                .name("Machine 01")
-                .type("CNC")
-                .vendor("TEST")
-                .status("IDLE")
-                .build();
-        when(machineRepository.findByCode("CNC-01")).thenReturn(Optional.of(machine));
+        var machine = baseMachine(machineId, "CNC-01");
+        when(machineIdentityResolverService.resolveRequired(isNull(), eq("CNC-01"))).thenReturn(machine);
 
         var payload = Map.of(
                 "machineCode", "CNC-01",
@@ -164,22 +155,15 @@ class IngestControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
 
-        verify(machineRepository, times(1)).findByCode("CNC-01");
+        verify(machineIdentityResolverService, times(1)).resolveRequired(isNull(), eq("CNC-01"));
         verify(ingestService, times(1)).ingestTelemetry(any());
     }
 
     @Test
     void ingestConnectionStatus_byCode_callsConnectionService() throws Exception {
         var machineId = UUID.randomUUID();
-        var machine = MachineEntity.builder()
-                .id(machineId)
-                .code("CNC-01")
-                .name("Machine 01")
-                .type("CNC")
-                .vendor("TEST")
-                .status("IDLE")
-                .build();
-        when(machineRepository.findByCode("CNC-01")).thenReturn(Optional.of(machine));
+        var machine = baseMachine(machineId, "CNC-01");
+        when(machineIdentityResolverService.resolveRequired(isNull(), eq("CNC-01"))).thenReturn(machine);
 
         var payload = Map.of(
                 "machineCode", "CNC-01",
@@ -194,6 +178,17 @@ class IngestControllerTest {
                 .andExpect(jsonPath("$.success").value(true));
 
         verify(connectionStateService, times(1)).markConnectionReported(any(), any(), any(), any());
+    }
+
+    private MachineEntity baseMachine(UUID machineId, String machineCode) {
+        return MachineEntity.builder()
+                .id(machineId)
+                .code(machineCode)
+                .name("Machine 01")
+                .type("CNC")
+                .vendor("TEST")
+                .status("IDLE")
+                .build();
     }
 }
 

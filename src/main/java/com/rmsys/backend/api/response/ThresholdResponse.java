@@ -9,7 +9,7 @@ public record ThresholdResponse(
 ) {
     @Builder
     public record ThresholdItem(
-            String machineId, String machineName, String metricCode,
+            String machineId, String machineCode, String machineName, String metricCode,
             Double warningValue, Double criticalValue, String unit
     ) {}
 }

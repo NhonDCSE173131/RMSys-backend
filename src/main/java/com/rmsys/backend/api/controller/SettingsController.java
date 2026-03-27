@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Map;
+
 @Tag(name = "Settings")
 @RestController
 @RequestMapping("/api/v1/settings")
@@ -18,10 +20,16 @@ public class SettingsController {
 
     private final SettingsService settingsService;
 
-    @GetMapping("/thresholds")
-    @Operation(summary = "Get all thresholds")
-    public ApiResponse<ThresholdResponse> thresholds() {
-        return ApiResponse.ok(settingsService.getAllThresholds());
+    @GetMapping("/ui-thresholds")
+    @Operation(summary = "Get UI thresholds")
+    public ApiResponse<Map<String, Object>> uiThresholds() {
+        return ApiResponse.ok(settingsService.getUiThresholds());
+    }
+
+    @GetMapping("/machine-thresholds")
+    @Operation(summary = "Get machine thresholds")
+    public ApiResponse<ThresholdResponse> machineThresholds() {
+        return ApiResponse.ok(settingsService.getMachineThresholds());
     }
 }
 

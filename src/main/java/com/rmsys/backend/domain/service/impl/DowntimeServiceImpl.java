@@ -4,6 +4,7 @@ import com.rmsys.backend.api.response.DowntimeHistoryPointResponse;
 import com.rmsys.backend.common.response.PageResponse;
 import com.rmsys.backend.domain.entity.DowntimeEventEntity;
 import com.rmsys.backend.domain.repository.DowntimeEventRepository;
+import com.rmsys.backend.domain.repository.MachineRepository;
 import com.rmsys.backend.domain.service.DowntimeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
@@ -17,6 +18,7 @@ import java.util.UUID;
 public class DowntimeServiceImpl implements DowntimeService {
 
     private final DowntimeEventRepository downtimeRepo;
+    private final MachineRepository machineRepo;
 
     @Override
     public PageResponse<DowntimeHistoryPointResponse> getMachineDowntimeHistory(
@@ -33,9 +35,11 @@ public class DowntimeServiceImpl implements DowntimeService {
     }
 
     private DowntimeHistoryPointResponse toResponse(DowntimeEventEntity e) {
+        String machineCode = machineRepo.findById(e.getMachineId()).map(m -> m.getCode()).orElse(null);
         return DowntimeHistoryPointResponse.builder()
                 .id(e.getId())
                 .machineId(e.getMachineId())
+                .machineCode(machineCode)
                 .reasonCode(e.getReasonCode())
                 .reasonGroup(e.getReasonGroup())
                 .startedAt(e.getStartedAt())

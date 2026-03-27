@@ -1,5 +1,7 @@
 package com.rmsys.backend.api.request;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
@@ -10,8 +12,10 @@ import java.time.Instant;
 import java.util.Map;
 
 @Builder
+@JsonIgnoreProperties(ignoreUnknown = true)
 public record IngestTelemetryByCodeRequest(
         @NotBlank(message = "machineCode is required") String machineCode,
+        @JsonAlias("sourceTimestamp")
         Instant ts,
         String connectionStatus,
         String machineState,

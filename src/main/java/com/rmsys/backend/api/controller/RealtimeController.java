@@ -1,11 +1,10 @@
 package com.rmsys.backend.api.controller;
 
-import com.rmsys.backend.domain.repository.MachineRepository;
+import com.rmsys.backend.domain.service.MachineIdentityResolverService;
 import com.rmsys.backend.infrastructure.realtime.SseEmitterRegistry;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -17,7 +16,6 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.util.Map;
 import java.util.UUID;
 
-@Slf4j
 @Tag(name = "Realtime")
 @RestController
 @RequestMapping("/api/v1/realtime")
@@ -25,11 +23,22 @@ import java.util.UUID;
 public class RealtimeController {
 
     private final SseEmitterRegistry sseRegistry;
-    private final MachineRepository machineRepository;
+    private final MachineIdentityResolverService machineIdentityResolverService;
 
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @Operation(summary = "Subscribe to realtime SSE stream")
     public SseEmitter stream(
+            @RequestParam(required = false) String machineId,
+            @RequestParam(required = false, defaultValue = "all") String topics,
+            @RequestParam(required = false) String sinceEventId,
+            @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId) {
+        String replayFrom = sinceEventId != null ? sinceEventId : lastEventId;
+        return sseRegistry.createEmitter(resolveMachineFilter(machineId), topics, replayFrom);
+    }
+
+    @GetMapping(value = "/stream/v2", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @Operation(summary = "Subscribe to canonical realtime SSE stream")
+    public SseEmitter streamV2(
             @RequestParam(required = false) String machineId,
             @RequestParam(required = false, defaultValue = "all") String topics,
             @RequestParam(required = false) String sinceEventId,
@@ -49,17 +58,7 @@ public class RealtimeController {
             return null;
         }
 
-        var value = machineIdentifier.trim();
-        try {
-            return UUID.fromString(value);
-        } catch (IllegalArgumentException ignored) {
-            return machineRepository.findByCode(value)
-                    .map(machine -> machine.getId())
-                    .orElseGet(() -> {
-                        log.warn("Ignoring unknown realtime machine filter '{}'; stream will fallback to all machines", value);
-                        return null;
-                    });
-        }
+        return machineIdentityResolverService.resolveRequiredId(machineIdentifier);
     }
 }
 

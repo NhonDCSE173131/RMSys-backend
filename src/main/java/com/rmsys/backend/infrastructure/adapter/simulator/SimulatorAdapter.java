@@ -33,7 +33,7 @@ public class SimulatorAdapter implements DeviceAdapter {
         var machines = machineRepo.findAll();
         long enabledMachines = machines.stream().filter(MachineEntity::getIsEnabled).count();
         if (enabledMachines > 0 && simulatorStartedLogged.compareAndSet(false, true)) {
-            log.info("Simulator noi bo da kich hoat. Bat dau sinh du lieu mo phong cho {} may.", enabledMachines);
+            log.info("Simulator noi bo da kich hoat. He thong dang sinh du lieu mo phong cho {} may (khong phai ket noi PLC that).", enabledMachines);
         }
         for (var machine : machines) {
             if (!machine.getIsEnabled()) continue;
@@ -73,7 +73,7 @@ public class SimulatorAdapter implements DeviceAdapter {
         String program = isRunning ? programs[rng.nextInt(programs.length)] : null;
 
         return NormalizedTelemetryDto.builder()
-                .machineId(machine.getId()).ts(Instant.now())
+                .machineId(machine.getId()).machineCode(machine.getCode()).ts(Instant.now())
                 .connectionStatus("ONLINE").machineState(s.machineState)
                 .operationMode(isRunning ? "AUTOMATIC" : "MANUAL")
                 .programName(program).cycleRunning(isRunning)

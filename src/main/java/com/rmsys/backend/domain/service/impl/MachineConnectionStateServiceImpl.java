@@ -92,6 +92,7 @@ public class MachineConnectionStateServiceImpl implements MachineConnectionState
         if (metadata != null && !metadata.isEmpty()) {
             sseRegistry.broadcast("machine-connection-reported", Map.of(
                     "machineId", machine.getId(),
+                    "machineCode", machine.getCode(),
                     "state", targetState,
                     "metadata", metadata,
                     "ts", at
@@ -161,16 +162,18 @@ public class MachineConnectionStateServiceImpl implements MachineConnectionState
         long freshnessSec = machine.getLastSeenAt() == null ? -1 : Duration.between(machine.getLastSeenAt(), at).toSeconds();
         var payload = new java.util.LinkedHashMap<String, Object>();
         payload.put("machineId", machine.getId());
+        payload.put("machineCode", machine.getCode());
         payload.put("from", fromState);
         payload.put("to", toState);
         payload.put("lastSeenAt", machine.getLastSeenAt());
         payload.put("freshnessSec", freshnessSec);
         payload.put("connectionUnstable", Boolean.TRUE.equals(machine.getConnectionUnstable()));
         payload.put("ts", at);
+        sseRegistry.broadcast("machine-connection-changed", payload);
         sseRegistry.broadcast(eventName, payload);
 
         if ("ONLINE".equals(toState) && !"ONLINE".equals(fromState)) {
-            log.info("Da nhan du lieu tu nguon PLC/collector cho may {} ({}) - connection {} -> {}",
+            log.info("Da nhan du lieu ingest cho may {} ({}) - connection {} -> {}",
                     machine.getCode(), machine.getName(), fromState, toState);
             return;
         }

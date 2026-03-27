@@ -8,6 +8,7 @@ import java.util.UUID;
 public record AlarmResponse(
         UUID id,
         UUID machineId,
+        String machineCode,
         String alarmCode,
         String alarmType,
         String severity,
