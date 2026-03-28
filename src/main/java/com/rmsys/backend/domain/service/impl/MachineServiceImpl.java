@@ -358,6 +358,9 @@ public class MachineServiceImpl implements MachineService {
     }
 
     private MachineDetailResponse toDetail(MachineEntity m) {
+        boolean offline = "OFFLINE".equalsIgnoreCase(m.getConnectionState());
+        // When OFFLINE, override operational status so UI never sees stale "RUNNING"
+        String effectiveStatus = offline ? "OFFLINE" : m.getStatus();
         return MachineDetailResponse.builder()
                 .id(m.getId())
                 .code(m.getCode())
@@ -367,7 +370,10 @@ public class MachineServiceImpl implements MachineService {
                 .model(m.getModel())
                 .lineId(m.getLineId())
                 .plantId(m.getPlantId())
-                .status(m.getStatus())
+                .status(effectiveStatus)
+                .connectionState(m.getConnectionState() != null ? m.getConnectionState() : "OFFLINE")
+                .connectionUnstable(Boolean.TRUE.equals(m.getConnectionUnstable()))
+                .lastSeenAt(m.getLastSeenAt())
                 .isEnabled(m.getIsEnabled())
                 .createdAt(m.getCreatedAt())
                 .build();

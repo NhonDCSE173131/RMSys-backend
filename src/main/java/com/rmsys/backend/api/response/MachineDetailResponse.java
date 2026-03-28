@@ -15,6 +15,9 @@ public record MachineDetailResponse(
         String lineId,
         String plantId,
         String status,
+        String connectionState,
+        Boolean connectionUnstable,
+        Instant lastSeenAt,
         boolean isEnabled,
         Instant createdAt
 ) {}

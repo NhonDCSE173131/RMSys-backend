@@ -33,9 +33,17 @@ public class DashboardServiceImpl implements DashboardService {
         int total = machines.size();
         int online = (int) machines.stream().filter(m -> !"OFFLINE".equalsIgnoreCase(m.getConnectionState())).count();
         int offline = total - online;
-        int running = (int) machines.stream().filter(m -> "RUNNING".equals(m.getStatus())).count();
-        int idle = (int) machines.stream().filter(m -> "IDLE".equals(m.getStatus())).count();
-        int fault = (int) machines.stream().filter(m -> "FAULT".equals(m.getStatus()) || "STOPPED".equals(m.getStatus())).count();
+        // Only count operational state for machines that are actually connected
+        int running = (int) machines.stream()
+                .filter(m -> "RUNNING".equals(m.getStatus()) && !"OFFLINE".equalsIgnoreCase(m.getConnectionState()))
+                .count();
+        int idle = (int) machines.stream()
+                .filter(m -> "IDLE".equals(m.getStatus()) && !"OFFLINE".equalsIgnoreCase(m.getConnectionState()))
+                .count();
+        int fault = (int) machines.stream()
+                .filter(m -> ("FAULT".equals(m.getStatus()) || "STOPPED".equals(m.getStatus()))
+                        && !"OFFLINE".equalsIgnoreCase(m.getConnectionState()))
+                .count();
 
         long criticalAlarms = alarmRepo.countByIsActiveTrueAndSeverity("CRITICAL");
         long warningAlarms = alarmRepo.countByIsActiveTrueAndSeverity("WARNING");

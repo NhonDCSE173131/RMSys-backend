@@ -39,6 +39,8 @@ public class SimulatorAdapter implements DeviceAdapter {
             if (!machine.getIsEnabled()) continue;
             var state = states.computeIfAbsent(machine.getId(), k -> new SimState());
             var dto = generateTelemetry(machine, state);
+            log.info("[SIM-PLC] Nhan data tu PLC gia lap: machineCode={}, machineId={}, ts={}, state={}",
+                    machine.getCode(), machine.getId(), dto.ts(), dto.machineState());
             ingestService.ingestTelemetry(dto);
         }
     }

@@ -69,6 +69,12 @@ public class MachineConnectionStateServiceImpl implements MachineConnectionState
         }
 
         machine.setConnectionState(targetState);
+        // When going OFFLINE, clear stale operational status so dashboard/UI
+        // never shows RUNNING for a disconnected machine.
+        if (ConnectionStatus.OFFLINE.name().equals(targetState)) {
+            machine.setStatus("OFFLINE");
+            log.info("Machine {} ({}) went OFFLINE – operational status reset.", machine.getCode(), machine.getName());
+        }
         registerFlapTransition(machine, now);
         emitConnectionChanged(machine, previousState, targetState, now);
         machineRepo.save(machine);
