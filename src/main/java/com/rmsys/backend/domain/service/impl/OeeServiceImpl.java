@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Service
@@ -48,10 +49,10 @@ public class OeeServiceImpl implements OeeService {
         }
 
         return OeeOverviewResponse.builder()
-                .avgAvailability(count > 0 ? sumA / count : 0)
-                .avgPerformance(count > 0 ? sumP / count : 0)
-                .avgQuality(count > 0 ? sumQ / count : 0)
-                .avgOee(count > 0 ? sumO / count : 0)
+                .avgAvailability(count > 0 ? sumA / count : null)
+                .avgPerformance(count > 0 ? sumP / count : null)
+                .avgQuality(count > 0 ? sumQ / count : null)
+                .avgOee(count > 0 ? sumO / count : null)
                 .lastUpdatedAt(Instant.now())
                 .machines(items).build();
     }
@@ -65,18 +66,20 @@ public class OeeServiceImpl implements OeeService {
                 .sorted(java.util.Comparator.comparing(s -> s.getBucketStart()))
                 .toList();
 
-        var points = snapshots.stream().map(snapshot -> AnalyticsTrendPointResponse.builder()
-                .timestamp(snapshot.getBucketStart())
-                .bucketEnd(snapshot.getBucketStart())
-                .sampleCount(1)
-                .missing(false)
-                .metrics(Map.of(
-                        "oee", snapshot.getOee() != null ? snapshot.getOee() : 0,
-                        "availability", snapshot.getAvailability() != null ? snapshot.getAvailability() : 0,
-                        "performance", snapshot.getPerformance() != null ? snapshot.getPerformance() : 0,
-                        "quality", snapshot.getQuality() != null ? snapshot.getQuality() : 0
-                ))
-                .build()).toList();
+        var points = snapshots.stream().map(snapshot -> {
+            var metrics = new LinkedHashMap<String, Double>();
+            metrics.put("oee", snapshot.getOee());
+            metrics.put("availability", snapshot.getAvailability());
+            metrics.put("performance", snapshot.getPerformance());
+            metrics.put("quality", snapshot.getQuality());
+            return AnalyticsTrendPointResponse.builder()
+                    .timestamp(snapshot.getBucketStart())
+                    .bucketEnd(snapshot.getBucketStart())
+                    .sampleCount(1)
+                    .missing(false)
+                    .metrics(metrics)
+                    .build();
+        }).toList();
 
         return AnalyticsTrendResponse.builder()
                 .from(resolvedFrom)
@@ -95,12 +98,7 @@ public class OeeServiceImpl implements OeeService {
                     .machineCode(machine.getCode())
                     .name(machine.getName())
                     .group(machine.getLineId())
-                    .metrics(Map.of(
-                            "oee", latest.map(s -> s.getOee() != null ? s.getOee() : 0).orElse(0.0),
-                            "availability", latest.map(s -> s.getAvailability() != null ? s.getAvailability() : 0).orElse(0.0),
-                            "performance", latest.map(s -> s.getPerformance() != null ? s.getPerformance() : 0).orElse(0.0),
-                            "quality", latest.map(s -> s.getQuality() != null ? s.getQuality() : 0).orElse(0.0)
-                    ))
+                    .metrics(metricsOf(latest.orElse(null)))
                     .build();
         }).toList();
 
@@ -134,6 +132,15 @@ public class OeeServiceImpl implements OeeService {
                 .rejectCount(reject)
                 .losses(losses)
                 .build();
+    }
+
+    private Map<String, Double> metricsOf(com.rmsys.backend.domain.entity.OeeSnapshotEntity snapshot) {
+        var metrics = new LinkedHashMap<String, Double>();
+        metrics.put("oee", snapshot != null ? snapshot.getOee() : null);
+        metrics.put("availability", snapshot != null ? snapshot.getAvailability() : null);
+        metrics.put("performance", snapshot != null ? snapshot.getPerformance() : null);
+        metrics.put("quality", snapshot != null ? snapshot.getQuality() : null);
+        return metrics;
     }
 }
 

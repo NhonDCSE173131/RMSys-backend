@@ -5,6 +5,7 @@ import com.rmsys.backend.common.exception.GlobalExceptionHandler;
 import com.rmsys.backend.domain.repository.MachineRepository;
 import com.rmsys.backend.domain.service.IngestService;
 import com.rmsys.backend.domain.service.MachineConnectionStateService;
+import com.rmsys.backend.domain.service.MachineIdentityResolverService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -40,6 +41,9 @@ class IngestControllerApiKeyTest {
 
     @MockitoBean
     private MachineRepository machineRepository;
+
+    @MockitoBean
+    private MachineIdentityResolverService machineIdentityResolverService;
 
     @MockitoBean
     private MachineConnectionStateService connectionStateService;

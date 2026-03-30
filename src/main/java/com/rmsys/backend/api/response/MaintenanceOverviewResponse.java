@@ -9,7 +9,7 @@ public record MaintenanceOverviewResponse(
         int totalMachines,
         int dueSoonCount,
         int overdueCount,
-        double avgHealthScore,
+        Double avgHealthScore,
         Instant lastUpdatedAt,
         java.util.List<MachineMaintenanceItem> machines
 ) {

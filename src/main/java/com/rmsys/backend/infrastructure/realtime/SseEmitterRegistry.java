@@ -352,8 +352,30 @@ public class SseEmitterRegistry {
             return fallback;
         }
 
+        if (data instanceof Map<?, ?> map) {
+            Object sourceTs = map.get("sourceTs");
+            if (sourceTs instanceof Instant instant) {
+                return instant;
+            }
+            Object ts = map.get("ts");
+            if (ts instanceof Instant instant) {
+                return instant;
+            }
+            return fallback;
+        }
+
         try {
             var method = data.getClass().getMethod("ts");
+            var result = method.invoke(data);
+            if (result instanceof Instant instant) {
+                return instant;
+            }
+        } catch (ReflectiveOperationException ignored) {
+            // keep fallback
+        }
+
+        try {
+            var method = data.getClass().getMethod("sourceTs");
             var result = method.invoke(data);
             if (result instanceof Instant instant) {
                 return instant;

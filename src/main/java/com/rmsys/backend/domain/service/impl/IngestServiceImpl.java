@@ -2,6 +2,8 @@ package com.rmsys.backend.domain.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rmsys.backend.common.enumtype.ConnectionStatus;
+import com.rmsys.backend.common.enumtype.MachineState;
 import com.rmsys.backend.common.exception.AppException;
 import com.rmsys.backend.domain.dto.NormalizedAlarmDto;
 import com.rmsys.backend.domain.dto.NormalizedDowntimeDto;
@@ -31,7 +33,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.Duration;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Set;
 
 @Slf4j
 @Service
@@ -50,6 +55,13 @@ public class IngestServiceImpl implements IngestService {
     private final MachineConnectionStateService connectionStateService;
     private final ObjectMapper objectMapper;
     private final TelemetryQualityService qualityService;
+    private static final Set<String> CANONICAL_OPERATING_STATES = Set.of(
+            MachineState.RUNNING.name(),
+            MachineState.IDLE.name(),
+            MachineState.WARMUP.name(),
+            MachineState.STOPPED.name(),
+            MachineState.EMERGENCY_STOP.name(),
+            MachineState.MAINTENANCE.name());
 
     @Override
     @Transactional
@@ -82,7 +94,7 @@ public class IngestServiceImpl implements IngestService {
         if (!outOfOrder) {
             updateMachineStatus(machine, normalizedDto);
             ruleEngine.evaluate(normalizedDto);
-            publishTelemetryEvent(normalizedDto);
+            publishTelemetryEvent(machine, normalizedDto, ts, receivedAt);
         } else {
             log.debug("Out-of-order telemetry kept for history only. machine={}, sourceTs={}, latestAccepted={}",
                     machine.getId(), ts, machine.getLatestAcceptedSourceTs());
@@ -240,13 +252,99 @@ public class IngestServiceImpl implements IngestService {
 
     private void updateMachineStatus(MachineEntity machine, NormalizedTelemetryDto dto) {
         if (dto.machineState() != null) {
-            machine.setStatus(dto.machineState());
+            machine.setStatus(normalizeOperationalState(dto.machineState()));
             machineRepo.save(machine);
         }
     }
 
-    private void publishTelemetryEvent(NormalizedTelemetryDto dto) {
-        sseRegistry.broadcast("machine-telemetry-updated", dto);
+    private void publishTelemetryEvent(MachineEntity machine, NormalizedTelemetryDto dto, Instant sourceTs, Instant receivedAt) {
+        String operationalState = normalizeOperationalState(dto.machineState() != null ? dto.machineState() : machine.getStatus());
+        String connectionState = normalizeConnectionState(machine.getConnectionState(), machine.getConnectionUnstable());
+        String displayState = resolveDisplayState(operationalState, connectionState);
+
+        var payload = new LinkedHashMap<String, Object>();
+        payload.put("machineId", dto.machineId());
+        payload.put("machineCode", machine.getCode());
+        payload.put("sourceTs", sourceTs);
+        payload.put("receivedAt", receivedAt);
+        payload.put("operationalState", operationalState);
+        payload.put("displayState", displayState);
+        payload.put("connectionState", connectionState);
+        payload.put("connectionUnstable", Boolean.TRUE.equals(machine.getConnectionUnstable()));
+        payload.put("lastSeenAt", machine.getLastSeenAt());
+        payload.put("dataFreshnessSec", machine.getLastSeenAt() == null ? null : Duration.between(machine.getLastSeenAt(), receivedAt).toSeconds());
+        payload.put("connectionReason", machine.getConnectionReason());
+        payload.put("connectionScope", machine.getConnectionScope());
+        payload.put("operationMode", dto.operationMode());
+        payload.put("programName", dto.programName());
+        payload.put("cycleRunning", dto.cycleRunning());
+        payload.put("powerKw", dto.powerKw());
+        payload.put("temperatureC", dto.temperatureC());
+        payload.put("vibrationMmS", dto.vibrationMmS());
+        payload.put("runtimeHours", dto.runtimeHours());
+        payload.put("cycleTimeSec", dto.cycleTimeSec());
+        payload.put("outputCount", dto.outputCount());
+        payload.put("goodCount", dto.goodCount());
+        payload.put("rejectCount", dto.rejectCount());
+        payload.put("spindleSpeedRpm", dto.spindleSpeedRpm());
+        payload.put("feedRateMmMin", dto.feedRateMmMin());
+        payload.put("idealCycleTimeSec", dto.idealCycleTimeSec());
+        payload.put("spindleLoadPct", dto.spindleLoadPct());
+        payload.put("servoLoadPct", dto.servoLoadPct());
+        payload.put("cuttingSpeedMMin", dto.cuttingSpeedMMin());
+        payload.put("depthOfCutMm", dto.depthOfCutMm());
+        payload.put("feedPerToothMm", dto.feedPerToothMm());
+        payload.put("widthOfCutMm", dto.widthOfCutMm());
+        payload.put("materialRemovalRateCm3Min", dto.materialRemovalRateCm3Min());
+        payload.put("weldingCurrentA", dto.weldingCurrentA());
+        payload.put("voltageV", dto.voltageV());
+        payload.put("currentA", dto.currentA());
+        payload.put("powerFactor", dto.powerFactor());
+        payload.put("frequencyHz", dto.frequencyHz());
+        payload.put("energyKwhShift", dto.energyKwhShift());
+        payload.put("energyKwhDay", dto.energyKwhDay());
+        payload.put("motorTemperatureC", dto.motorTemperatureC());
+        payload.put("bearingTemperatureC", dto.bearingTemperatureC());
+        payload.put("cabinetTemperatureC", dto.cabinetTemperatureC());
+        payload.put("servoOnHours", dto.servoOnHours());
+        payload.put("startStopCount", dto.startStopCount());
+        payload.put("lubricationLevelPct", dto.lubricationLevelPct());
+        payload.put("batteryLow", dto.batteryLow());
+
+        sseRegistry.broadcast("machine-telemetry-updated", payload);
+    }
+
+    private String normalizeConnectionState(String connectionState, Boolean unstable) {
+        String normalized = connectionState == null ? ConnectionStatus.OFFLINE.name() : connectionState.trim().toUpperCase();
+        if (ConnectionStatus.ONLINE.name().equals(normalized) && Boolean.TRUE.equals(unstable)) {
+            return ConnectionStatus.UNSTABLE.name();
+        }
+        return switch (normalized) {
+            case "ONLINE", "STALE", "OFFLINE", "UNSTABLE" -> normalized;
+            default -> ConnectionStatus.OFFLINE.name();
+        };
+    }
+
+    private String normalizeOperationalState(String rawState) {
+        if (rawState == null || rawState.isBlank()) {
+            return MachineState.IDLE.name();
+        }
+        String normalized = rawState.trim().toUpperCase();
+        if (CANONICAL_OPERATING_STATES.contains(normalized)) {
+            return normalized;
+        }
+        return switch (normalized) {
+            case "STOP" -> MachineState.STOPPED.name();
+            case "FAULT", "ERROR", "ALARM", "ESTOP", "E_STOP" -> MachineState.EMERGENCY_STOP.name();
+            default -> MachineState.IDLE.name();
+        };
+    }
+
+    private String resolveDisplayState(String operationalState, String connectionState) {
+        if (!ConnectionStatus.ONLINE.name().equals(connectionState)) {
+            return connectionState;
+        }
+        return operationalState;
     }
 
     private boolean isOutOfOrder(MachineEntity machine, Instant sourceTs) {

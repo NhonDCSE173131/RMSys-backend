@@ -124,6 +124,9 @@ public class MachineConnectionStateServiceImpl implements MachineConnectionState
         if (silenceSec >= staleThresholdSec) {
             return ConnectionStatus.STALE.name();
         }
+        if (Boolean.TRUE.equals(machine.getConnectionUnstable())) {
+            return ConnectionStatus.UNSTABLE.name();
+        }
         return ConnectionStatus.ONLINE.name();
     }
 
@@ -142,12 +145,20 @@ public class MachineConnectionStateServiceImpl implements MachineConnectionState
 
         if (flapCount >= unstableFlapThreshold && !Boolean.TRUE.equals(machine.getConnectionUnstable())) {
             machine.setConnectionUnstable(true);
-            sseRegistry.broadcast("machine-connection-unstable", Map.of(
-                    "machineId", machine.getId(),
-                    "flapCount", flapCount,
-                    "windowSec", flapWindowSec,
-                    "ts", at
-            ));
+            if (ConnectionStatus.ONLINE.name().equals(normalizeState(machine.getConnectionState()))) {
+                machine.setConnectionState(ConnectionStatus.UNSTABLE.name());
+            }
+            var unstablePayload = new java.util.LinkedHashMap<String, Object>();
+            unstablePayload.put("machineId", machine.getId());
+            unstablePayload.put("machineCode", machine.getCode());
+            unstablePayload.put("connectionState", ConnectionStatus.UNSTABLE.name());
+            unstablePayload.put("displayState", ConnectionStatus.UNSTABLE.name());
+            unstablePayload.put("lastSeenAt", machine.getLastSeenAt());
+            unstablePayload.put("dataFreshnessSec", dataFreshnessSec(machine.getLastSeenAt(), at));
+            unstablePayload.put("flapCount", flapCount);
+            unstablePayload.put("windowSec", flapWindowSec);
+            unstablePayload.put("ts", at);
+            sseRegistry.broadcast("machine-connection-unstable", unstablePayload);
         }
     }
 
@@ -159,24 +170,32 @@ public class MachineConnectionStateServiceImpl implements MachineConnectionState
         if (Duration.between(machine.getLastConnectionChangedAt(), now).toSeconds() > flapWindowSec) {
             machine.setConnectionUnstable(false);
             machine.setConnectionFlapCount(0);
+            if (ConnectionStatus.UNSTABLE.name().equals(normalizeState(machine.getConnectionState()))) {
+                machine.setConnectionState(ConnectionStatus.ONLINE.name());
+            }
         }
     }
 
     private void emitConnectionChanged(MachineEntity machine, String fromState, String toState, Instant at) {
-        String eventName = switch (toState) {
+        String normalizedTo = normalizeState(toState);
+        String eventName = switch (normalizedTo) {
             case "ONLINE" -> "machine-connection-online";
             case "STALE" -> "machine-connection-stale";
+            case "UNSTABLE" -> "machine-connection-unstable";
             default -> "machine-connection-offline";
         };
 
-        long freshnessSec = machine.getLastSeenAt() == null ? -1 : Duration.between(machine.getLastSeenAt(), at).toSeconds();
+        long freshnessSec = dataFreshnessSec(machine.getLastSeenAt(), at);
+        String displayState = resolveDisplayState(normalizedTo);
         var payload = new java.util.LinkedHashMap<String, Object>();
         payload.put("machineId", machine.getId());
         payload.put("machineCode", machine.getCode());
         payload.put("from", fromState);
-        payload.put("to", toState);
+        payload.put("to", normalizedTo);
+        payload.put("connectionState", normalizedTo);
+        payload.put("displayState", displayState);
         payload.put("lastSeenAt", machine.getLastSeenAt());
-        payload.put("freshnessSec", freshnessSec);
+        payload.put("dataFreshnessSec", freshnessSec);
         payload.put("connectionUnstable", Boolean.TRUE.equals(machine.getConnectionUnstable()));
         payload.put("connectionReason", machine.getConnectionReason());
         payload.put("connectionScope", machine.getConnectionScope());
@@ -184,13 +203,13 @@ public class MachineConnectionStateServiceImpl implements MachineConnectionState
         sseRegistry.broadcast("machine-connection-changed", payload);
         sseRegistry.broadcast(eventName, payload);
 
-        if ("ONLINE".equals(toState) && !"ONLINE".equals(fromState)) {
+        if (ConnectionStatus.ONLINE.name().equals(normalizedTo) && !ConnectionStatus.ONLINE.name().equals(normalizeState(fromState))) {
             log.info("Da nhan du lieu ingest cho may {} ({}) - connection {} -> {}",
-                    machine.getCode(), machine.getName(), fromState, toState);
+                    machine.getCode(), machine.getName(), fromState, normalizedTo);
             return;
         }
 
-        log.info("Machine {} ({}) connection {} -> {}", machine.getCode(), machine.getName(), fromState, toState);
+        log.info("Machine {} ({}) connection {} -> {}", machine.getCode(), machine.getName(), fromState, normalizedTo);
     }
 
     private Instant max(Instant current, Instant candidate) {
@@ -204,7 +223,16 @@ public class MachineConnectionStateServiceImpl implements MachineConnectionState
     }
 
     private String normalizeState(String state) {
-        return state == null ? ConnectionStatus.OFFLINE.name() : state;
+        if (state == null || state.isBlank()) {
+            return ConnectionStatus.OFFLINE.name();
+        }
+        String normalized = state.trim().toUpperCase();
+        return switch (normalized) {
+            case "ONLINE", "ON" -> ConnectionStatus.ONLINE.name();
+            case "STALE", "DEGRADED", "LAGGING" -> ConnectionStatus.STALE.name();
+            case "UNSTABLE", "FLAPPING" -> ConnectionStatus.UNSTABLE.name();
+            default -> ConnectionStatus.OFFLINE.name();
+        };
     }
 
     private String normalizeReportedState(String reportedState) {
@@ -216,9 +244,23 @@ public class MachineConnectionStateServiceImpl implements MachineConnectionState
         return switch (normalized) {
             case "ONLINE", "ON" -> ConnectionStatus.ONLINE.name();
             case "STALE", "DEGRADED", "LAGGING" -> ConnectionStatus.STALE.name();
+            case "UNSTABLE", "FLAPPING" -> ConnectionStatus.UNSTABLE.name();
             case "OFFLINE", "DISCONNECTED" -> ConnectionStatus.OFFLINE.name();
             case "RECOVERING" -> ConnectionStatus.ONLINE.name();
             default -> throw new AppException("VALIDATION_ERROR", "Unsupported connectionStatus: " + reportedState);
+        };
+    }
+
+    private long dataFreshnessSec(Instant lastSeenAt, Instant at) {
+        return lastSeenAt == null ? -1 : Duration.between(lastSeenAt, at).toSeconds();
+    }
+
+    private String resolveDisplayState(String connectionState) {
+        return switch (connectionState) {
+            case "OFFLINE" -> "OFFLINE";
+            case "STALE" -> "STALE";
+            case "UNSTABLE" -> "UNSTABLE";
+            default -> "ONLINE";
         };
     }
 

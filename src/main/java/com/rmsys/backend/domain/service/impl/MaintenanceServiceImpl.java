@@ -33,9 +33,11 @@ public class MaintenanceServiceImpl implements MaintenanceService {
             var prediction = predictionRepo.findFirstByMachineIdOrderByTsDesc(m.getId());
             var maint = maintRepo.findFirstByMachineIdOrderByTsDesc(m.getId());
 
-            double score = health.map(h -> h.getHealthScore() != null ? h.getHealthScore() : 80.0).orElse(80.0);
-            healthSum += score;
-            healthCount++;
+            Double score = health.map(h -> h.getHealthScore()).orElse(null);
+            if (score != null) {
+                healthSum += score;
+                healthCount++;
+            }
 
             Double remaining = prediction.map(p -> p.getRemainingHoursToService()).orElse(null);
             if (remaining != null && remaining < 100) dueSoon++;
@@ -45,7 +47,7 @@ public class MaintenanceServiceImpl implements MaintenanceService {
                     .machineId(m.getId()).machineCode(m.getCode()).machineName(m.getName())
                     .runtimeHours(maint.map(mt -> mt.getRuntimeHours()).orElse(null))
                     .healthScore(score)
-                    .riskLevel(health.map(h -> h.getRiskLevel()).orElse("LOW"))
+                    .riskLevel(health.map(h -> h.getRiskLevel()).orElse(null))
                     .reason(health.map(h -> h.getMainReason()).orElse(null))
                     .remainingHoursToService(remaining)
                     .nextMaintenanceDate(prediction.map(p -> p.getNextMaintenanceDate()).orElse(null))
@@ -55,7 +57,7 @@ public class MaintenanceServiceImpl implements MaintenanceService {
 
         return MaintenanceOverviewResponse.builder()
                 .totalMachines(machines.size()).dueSoonCount(dueSoon).overdueCount(overdue)
-                .avgHealthScore(healthCount > 0 ? healthSum / healthCount : 0)
+                .avgHealthScore(healthCount > 0 ? healthSum / healthCount : null)
                 .lastUpdatedAt(Instant.now())
                 .machines(items).build();
     }

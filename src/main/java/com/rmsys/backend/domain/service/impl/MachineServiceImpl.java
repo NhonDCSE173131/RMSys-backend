@@ -10,6 +10,8 @@ import com.rmsys.backend.api.response.MachineSnapshotResponse;
 import com.rmsys.backend.api.response.MachineSummaryResponse;
 import com.rmsys.backend.api.response.TelemetryHistoryPointResponse;
 import com.rmsys.backend.api.response.TelemetrySeriesResponse;
+import com.rmsys.backend.common.enumtype.ConnectionStatus;
+import com.rmsys.backend.common.enumtype.MachineState;
 import com.rmsys.backend.common.exception.AppException;
 import com.rmsys.backend.domain.entity.MachineEntity;
 import com.rmsys.backend.domain.entity.MachineTelemetryEntity;
@@ -39,6 +41,7 @@ import java.util.Objects;
 import java.util.OptionalDouble;
 import java.util.OptionalInt;
 import java.util.UUID;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -56,6 +59,13 @@ public class MachineServiceImpl implements MachineService {
     private final EnergyTelemetryRepository energyTelemetryRepo;
     private final MaintenanceTelemetryRepository maintenanceTelemetryRepo;
     private final ToolUsageTelemetryRepository toolUsageRepo;
+    private static final Set<String> CANONICAL_OPERATING_STATES = Set.of(
+            MachineState.RUNNING.name(),
+            MachineState.IDLE.name(),
+            MachineState.WARMUP.name(),
+            MachineState.STOPPED.name(),
+            MachineState.EMERGENCY_STOP.name(),
+            MachineState.MAINTENANCE.name());
 
     @Override
     public List<MachineDetailResponse> getAllMachines() {
@@ -407,7 +417,7 @@ public class MachineServiceImpl implements MachineService {
                 .materialRemovalRateCm3Min(selected.contains("materialremovalratecm3min") ? point.materialRemovalRateCm3Min() : null)
                 .weldingCurrentA(selected.contains("weldingcurrenta") ? point.weldingCurrentA() : null)
                 .axisLoadPct(selected.contains("axisloadpct") ? point.axisLoadPct() : null)
-                .qualityScore(point.qualityScore())
+                .qualityScore(selected.contains("qualityscore") ? point.qualityScore() : null)
                 .sampleCount(point.sampleCount())
                 .missing(point.missing())
                 .gapDetected(point.gapDetected())
@@ -416,7 +426,8 @@ public class MachineServiceImpl implements MachineService {
 
     private MachineDetailResponse toDetail(MachineEntity m) {
         String operationalState = resolveOperationalState(m, null);
-        String displayState = resolveDisplayState(operationalState, m.getConnectionState());
+        String connectionState = normalizeConnectionState(m.getConnectionState(), m.getConnectionUnstable());
+        String displayState = resolveDisplayState(operationalState, connectionState, m.getConnectionUnstable());
         return MachineDetailResponse.builder()
                 .id(m.getId())
                 .code(m.getCode())
@@ -429,7 +440,7 @@ public class MachineServiceImpl implements MachineService {
                 .status(displayState)
                 .operationalState(operationalState)
                 .displayState(displayState)
-                .connectionState(m.getConnectionState() != null ? m.getConnectionState() : "OFFLINE")
+                .connectionState(connectionState)
                 .connectionUnstable(Boolean.TRUE.equals(m.getConnectionUnstable()))
                 .lastSeenAt(m.getLastSeenAt())
                 .dataFreshnessSec(dataFreshnessSec(m))
@@ -483,26 +494,28 @@ public class MachineServiceImpl implements MachineService {
 
     private MachineSnapshotResponse emptySnapshot(MachineEntity m) {
         Long freshnessSec = dataFreshnessSec(m);
+        String operationalState = resolveOperationalState(m, null);
+        String connectionState = normalizeConnectionState(m.getConnectionState(), m.getConnectionUnstable());
 
         return MachineSnapshotResponse.builder()
                 .machineId(m.getId())
                 .machineCode(m.getCode())
                 .machineName(m.getName())
                 .connectionStatus("OFFLINE")
-                .connectionState(m.getConnectionState() != null ? m.getConnectionState() : "OFFLINE")
+                .connectionState(connectionState)
                 .connectionUnstable(Boolean.TRUE.equals(m.getConnectionUnstable()))
                 .connectionReason(m.getConnectionReason())
                 .connectionScope(m.getConnectionScope())
                 .lastSeenAt(m.getLastSeenAt())
                 .dataFreshnessSec(freshnessSec)
-                .machineState(resolveDisplayState(resolveOperationalState(m, null), m.getConnectionState()))
+                .machineState(resolveDisplayState(operationalState, connectionState, m.getConnectionUnstable()))
                 .build();
     }
 
     private MachineOverviewResponse toOverview(MachineEntity machine, MachineTelemetryEntity latestTelemetry) {
-        String connectionState = machine.getConnectionState() != null ? machine.getConnectionState() : "OFFLINE";
+        String connectionState = normalizeConnectionState(machine.getConnectionState(), machine.getConnectionUnstable());
         String operationalState = resolveOperationalState(machine, latestTelemetry);
-        String displayState = resolveDisplayState(operationalState, connectionState);
+        String displayState = resolveDisplayState(operationalState, connectionState, machine.getConnectionUnstable());
 
         var latestOee = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(machine.getId(), "HOUR");
         var latestHealth = healthRepo.findFirstByMachineIdOrderByBucketStartDesc(machine.getId());
@@ -510,6 +523,8 @@ public class MachineServiceImpl implements MachineService {
         var latestToolUsage = toolUsageRepo.findByMachineIdOrderByTsDesc(machine.getId()).stream().findFirst();
         var latestEnergy = energyTelemetryRepo.findFirstByMachineIdOrderByTsDesc(machine.getId()).orElse(null);
         var latestMaintenance = maintenanceTelemetryRepo.findFirstByMachineIdOrderByTsDesc(machine.getId()).orElse(null);
+        var recentTelemetry = telemetryRepo.findRecentByMachineId(machine.getId(), Instant.now().minus(5, ChronoUnit.MINUTES));
+        Double anomalyScore = computeAnomalyScore(recentTelemetry, latestTelemetry);
 
         return MachineOverviewResponse.builder()
                 .machineId(machine.getId())
@@ -539,9 +554,9 @@ public class MachineServiceImpl implements MachineService {
                         .performance(latestOee.map(o -> o.getPerformance()).orElse(null))
                         .quality(latestOee.map(o -> o.getQuality()).orElse(null))
                         .machineHealth(latestHealth.map(h -> h.getHealthScore()).orElse(null))
-                        .anomalyScore(null)
+                        .anomalyScore(anomalyScore)
                         .build())
-                .maintenance(toOverviewMaintenance(prediction.orElse(null)))
+                .maintenance(toOverviewMaintenance(prediction.orElse(null), latestHealth.map(h -> h.getHealthScore()).orElse(null)))
                 .tool(toOverviewTool(latestToolUsage.orElse(null)))
                 .build();
     }
@@ -593,7 +608,9 @@ public class MachineServiceImpl implements MachineService {
         return left != null ? left : right;
     }
 
-    private MachineOverviewMaintenance toOverviewMaintenance(com.rmsys.backend.domain.entity.MaintenancePredictionEntity prediction) {
+    private MachineOverviewMaintenance toOverviewMaintenance(
+            com.rmsys.backend.domain.entity.MaintenancePredictionEntity prediction,
+            Double latestHealthScore) {
         if (prediction == null) {
             return null;
         }
@@ -606,7 +623,7 @@ public class MachineServiceImpl implements MachineService {
                 .remainingMaintenanceHours(prediction.getRemainingHoursToService())
                 .nextMaintenanceDate(prediction.getNextMaintenanceDate())
                 .riskLevel(prediction.getRiskLevel())
-                .predictedFailureWindow(null)
+                .predictedFailureWindow(resolvePredictedFailureWindow(prediction, latestHealthScore))
                 .recommendation(prediction.getRecommendedAction())
                 .build();
     }
@@ -624,17 +641,142 @@ public class MachineServiceImpl implements MachineService {
 
     private String resolveOperationalState(MachineEntity machine, MachineTelemetryEntity latestTelemetry) {
         if (latestTelemetry != null && latestTelemetry.getMachineState() != null && !latestTelemetry.getMachineState().isBlank()) {
-            return latestTelemetry.getMachineState();
+            return normalizeOperationalState(latestTelemetry.getMachineState());
         }
-        return machine.getStatus();
+        return normalizeOperationalState(machine.getStatus());
     }
 
-    private String resolveDisplayState(String operationalState, String connectionState) {
-        String normalizedConnection = connectionState == null ? "OFFLINE" : connectionState;
-        if (!"ONLINE".equalsIgnoreCase(normalizedConnection)) {
+    private String resolveDisplayState(String operationalState, String connectionState, Boolean connectionUnstable) {
+        String normalizedConnection = normalizeConnectionState(connectionState, connectionUnstable);
+        if (!ConnectionStatus.ONLINE.name().equalsIgnoreCase(normalizedConnection)) {
             return normalizedConnection;
         }
-        return operationalState;
+        return operationalState != null ? operationalState : MachineState.IDLE.name();
+    }
+
+    private String normalizeConnectionState(String connectionState, Boolean connectionUnstable) {
+        String normalized = connectionState == null ? ConnectionStatus.OFFLINE.name() : connectionState.trim().toUpperCase();
+        if (ConnectionStatus.ONLINE.name().equals(normalized) && Boolean.TRUE.equals(connectionUnstable)) {
+            return ConnectionStatus.UNSTABLE.name();
+        }
+        if (ConnectionStatus.STALE.name().equals(normalized) || ConnectionStatus.OFFLINE.name().equals(normalized)
+                || ConnectionStatus.UNSTABLE.name().equals(normalized) || ConnectionStatus.ONLINE.name().equals(normalized)) {
+            return normalized;
+        }
+        return ConnectionStatus.OFFLINE.name();
+    }
+
+    private String normalizeOperationalState(String rawState) {
+        if (rawState == null || rawState.isBlank()) {
+            return MachineState.IDLE.name();
+        }
+        String normalized = rawState.trim().toUpperCase();
+        if (CANONICAL_OPERATING_STATES.contains(normalized)) {
+            return normalized;
+        }
+        return switch (normalized) {
+            case "STOP" -> MachineState.STOPPED.name();
+            case "ALARM", "FAULT", "ERROR", "ESTOP", "E_STOP" -> MachineState.EMERGENCY_STOP.name();
+            default -> MachineState.IDLE.name();
+        };
+    }
+
+    private Double computeAnomalyScore(List<MachineTelemetryEntity> recentTelemetry, MachineTelemetryEntity latestTelemetry) {
+        if (latestTelemetry == null || recentTelemetry == null || recentTelemetry.size() < 3) {
+            return null;
+        }
+
+        Double baselineTemp = averageNonNull(recentTelemetry, MachineTelemetryEntity::getTemperatureC);
+        Double baselineVibration = averageNonNull(recentTelemetry, MachineTelemetryEntity::getVibrationMmS);
+        Double baselineCycle = averageNonNull(recentTelemetry, MachineTelemetryEntity::getCycleTimeSec);
+        Double baselinePower = averageNonNull(recentTelemetry, MachineTelemetryEntity::getPowerKw);
+
+        double score = 0;
+        score += weightedDeviation(latestTelemetry.getTemperatureC(), baselineTemp, 35);
+        score += weightedDeviation(latestTelemetry.getVibrationMmS(), baselineVibration, 30);
+        score += weightedDeviation(latestTelemetry.getCycleTimeSec(), baselineCycle, 20);
+        score += weightedDeviation(latestTelemetry.getPowerKw(), baselinePower, 15);
+
+        if (latestTelemetry.getRejectCount() != null && latestTelemetry.getOutputCount() != null && latestTelemetry.getOutputCount() > 0) {
+            double rejectRatePct = (latestTelemetry.getRejectCount() * 100.0) / latestTelemetry.getOutputCount();
+            if (rejectRatePct >= 10) {
+                score += 15;
+            } else if (rejectRatePct >= 5) {
+                score += 8;
+            }
+        }
+
+        return Math.min(100.0, Math.round(score * 100.0) / 100.0);
+    }
+
+    private Double averageNonNull(List<MachineTelemetryEntity> items, Function<MachineTelemetryEntity, Double> getter) {
+        OptionalDouble avg = items.stream()
+                .map(getter)
+                .filter(Objects::nonNull)
+                .mapToDouble(Double::doubleValue)
+                .average();
+        return avg.isPresent() ? avg.getAsDouble() : null;
+    }
+
+    private double weightedDeviation(Double current, Double baseline, double weight) {
+        if (current == null || baseline == null || baseline <= 0) {
+            return 0;
+        }
+        double ratio = Math.abs(current - baseline) / baseline;
+        if (ratio < 0.1) {
+            return 0;
+        }
+        if (ratio < 0.25) {
+            return weight * 0.4;
+        }
+        if (ratio < 0.5) {
+            return weight * 0.75;
+        }
+        return weight;
+    }
+
+    private String resolvePredictedFailureWindow(com.rmsys.backend.domain.entity.MaintenancePredictionEntity prediction, Double healthScore) {
+        if (prediction.getNextMaintenanceDate() != null) {
+            long days = ChronoUnit.DAYS.between(Instant.now(), prediction.getNextMaintenanceDate());
+            if (days <= 1) {
+                return "< 24h";
+            }
+            if (days <= 3) {
+                return "1-3 days";
+            }
+            if (days <= 7) {
+                return "3-7 days";
+            }
+            return "> 7 days";
+        }
+
+        Double remainingHours = prediction.getRemainingHoursToService();
+        if (remainingHours != null) {
+            if (remainingHours <= 24) {
+                return "< 24h";
+            }
+            if (remainingHours <= 72) {
+                return "1-3 days";
+            }
+            if (remainingHours <= 168) {
+                return "3-7 days";
+            }
+            return "> 7 days";
+        }
+
+        if (healthScore == null) {
+            return null;
+        }
+        if (healthScore < 35) {
+            return "< 24h";
+        }
+        if (healthScore < 55) {
+            return "1-3 days";
+        }
+        if (healthScore < 75) {
+            return "3-7 days";
+        }
+        return "> 7 days";
     }
 
     private Long dataFreshnessSec(MachineEntity machine) {

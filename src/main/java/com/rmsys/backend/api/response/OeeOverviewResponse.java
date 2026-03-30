@@ -5,10 +5,10 @@ import java.util.UUID;
 
 @Builder
 public record OeeOverviewResponse(
-        double avgAvailability,
-        double avgPerformance,
-        double avgQuality,
-        double avgOee,
+        Double avgAvailability,
+        Double avgPerformance,
+        Double avgQuality,
+        Double avgOee,
         java.time.Instant lastUpdatedAt,
         java.util.List<MachineOeeItem> machines
 ) {

@@ -18,6 +18,7 @@ public class AggregationScheduler {
         try {
             aggregationService.aggregateOee();
             aggregationService.aggregateHealth();
+            aggregationService.aggregateMaintenancePredictions();
         } catch (Exception e) {
             log.error("Aggregation error", e);
         }
