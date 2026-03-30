@@ -1,18 +1,35 @@
--- V1: Initial schema for Manufacturing Monitor
+-- V1: Consolidated schema for Manufacturing Monitor
+-- (All columns from original V1 + V3 + V4 + V6 merged. No seed data.)
+
+-- ============================================================
 -- Master tables
+-- ============================================================
 CREATE TABLE machines (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    code            VARCHAR(50)  NOT NULL UNIQUE,
-    name            VARCHAR(200) NOT NULL,
-    type            VARCHAR(50)  NOT NULL DEFAULT 'CNC_MACHINE',
-    vendor          VARCHAR(50)  NOT NULL DEFAULT 'UNKNOWN',
-    model           VARCHAR(200),
-    line_id         VARCHAR(50),
-    plant_id        VARCHAR(50),
-    status          VARCHAR(30)  NOT NULL DEFAULT 'OFFLINE',
-    is_enabled      BOOLEAN      NOT NULL DEFAULT TRUE,
-    created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ  NOT NULL DEFAULT now()
+    id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code                        VARCHAR(50)  NOT NULL UNIQUE,
+    name                        VARCHAR(200) NOT NULL,
+    type                        VARCHAR(50)  NOT NULL DEFAULT 'CNC_MACHINE',
+    vendor                      VARCHAR(50)  NOT NULL DEFAULT 'UNKNOWN',
+    model                       VARCHAR(200),
+    line_id                     VARCHAR(50),
+    plant_id                    VARCHAR(50),
+    status                      VARCHAR(30)  NOT NULL DEFAULT 'OFFLINE',
+    is_enabled                  BOOLEAN      NOT NULL DEFAULT TRUE,
+    -- Connection health (was V3)
+    connection_state            VARCHAR(20)  NOT NULL DEFAULT 'OFFLINE',
+    connection_unstable         BOOLEAN      NOT NULL DEFAULT FALSE,
+    last_seen_at                TIMESTAMPTZ,
+    last_telemetry_source_ts    TIMESTAMPTZ,
+    last_telemetry_received_at  TIMESTAMPTZ,
+    latest_accepted_source_ts   TIMESTAMPTZ,
+    last_payload_fingerprint    VARCHAR(500),
+    last_connection_changed_at  TIMESTAMPTZ,
+    connection_flap_count       INT          NOT NULL DEFAULT 0,
+    -- Connection diagnostics (was V6)
+    connection_scope            VARCHAR(30),
+    connection_reason           VARCHAR(80),
+    created_at                  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at                  TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
 CREATE TABLE tool_catalogs (
@@ -41,32 +58,49 @@ CREATE TABLE machine_thresholds (
     UNIQUE (machine_id, metric_code)
 );
 
+-- ============================================================
 -- Time-series tables
+-- ============================================================
 CREATE TABLE machine_telemetry (
-    id                  BIGSERIAL PRIMARY KEY,
-    machine_id          UUID         NOT NULL REFERENCES machines(id),
-    ts                  TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    connection_status   VARCHAR(20),
-    machine_state       VARCHAR(30),
-    operation_mode      VARCHAR(30),
-    alarm_active        BOOLEAN DEFAULT FALSE,
-    program_name        VARCHAR(200),
-    cycle_running       BOOLEAN DEFAULT FALSE,
-    current_job         VARCHAR(200),
-    power_kw            DOUBLE PRECISION,
-    temperature_c       DOUBLE PRECISION,
-    vibration_mm_s      DOUBLE PRECISION,
-    runtime_hours       DOUBLE PRECISION,
-    cycle_time_sec      DOUBLE PRECISION,
-    output_count        INT DEFAULT 0,
-    good_count          INT DEFAULT 0,
-    reject_count        INT DEFAULT 0,
-    spindle_speed_rpm   DOUBLE PRECISION,
-    feed_rate_mm_min    DOUBLE PRECISION,
-    axis_load_pct       DOUBLE PRECISION,
-    metadata_json       JSONB
+    id                          BIGSERIAL PRIMARY KEY,
+    machine_id                  UUID         NOT NULL REFERENCES machines(id),
+    ts                          TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    connection_status           VARCHAR(20),
+    machine_state               VARCHAR(30),
+    operation_mode              VARCHAR(30),
+    alarm_active                BOOLEAN      DEFAULT FALSE,
+    program_name                VARCHAR(200),
+    cycle_running               BOOLEAN      DEFAULT FALSE,
+    current_job                 VARCHAR(200),
+    power_kw                    DOUBLE PRECISION,
+    temperature_c               DOUBLE PRECISION,
+    vibration_mm_s              DOUBLE PRECISION,
+    runtime_hours               DOUBLE PRECISION,
+    cycle_time_sec              DOUBLE PRECISION,
+    output_count                INT          DEFAULT 0,
+    good_count                  INT          DEFAULT 0,
+    reject_count                INT          DEFAULT 0,
+    spindle_speed_rpm           DOUBLE PRECISION,
+    feed_rate_mm_min            DOUBLE PRECISION,
+    axis_load_pct               DOUBLE PRECISION,
+    -- Quality metrics (was V4)
+    quality_score               DOUBLE PRECISION,
+    is_late_arrival             BOOLEAN      DEFAULT FALSE,
+    source_sequence             BIGINT,
+    -- Extended process telemetry (was V6)
+    ideal_cycle_time_sec        DOUBLE PRECISION,
+    spindle_load_pct            DOUBLE PRECISION,
+    servo_load_pct              DOUBLE PRECISION,
+    cutting_speed_m_min         DOUBLE PRECISION,
+    depth_of_cut_mm             DOUBLE PRECISION,
+    feed_per_tooth_mm           DOUBLE PRECISION,
+    width_of_cut_mm             DOUBLE PRECISION,
+    material_removal_rate_cm3_min DOUBLE PRECISION,
+    welding_current_a           DOUBLE PRECISION,
+    metadata_json               JSONB
 );
 CREATE INDEX idx_telemetry_machine_ts ON machine_telemetry(machine_id, ts DESC);
+CREATE INDEX idx_telemetry_quality    ON machine_telemetry(machine_id, is_late_arrival);
 
 CREATE TABLE energy_telemetry (
     id                  BIGSERIAL PRIMARY KEY,
@@ -110,11 +144,13 @@ CREATE TABLE maintenance_telemetry (
     servo_on_hours          DOUBLE PRECISION,
     start_stop_count        INT,
     lubrication_level_pct   DOUBLE PRECISION,
-    battery_low             BOOLEAN DEFAULT FALSE
+    battery_low             BOOLEAN      DEFAULT FALSE
 );
 CREATE INDEX idx_maint_telemetry_machine_ts ON maintenance_telemetry(machine_id, ts DESC);
 
+-- ============================================================
 -- Event tables
+-- ============================================================
 CREATE TABLE alarm_events (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     machine_id          UUID         NOT NULL REFERENCES machines(id),
@@ -146,7 +182,9 @@ CREATE TABLE downtime_events (
 );
 CREATE INDEX idx_downtime_machine ON downtime_events(machine_id, started_at DESC);
 
+-- ============================================================
 -- Aggregate tables
+-- ============================================================
 CREATE TABLE oee_snapshots (
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     machine_id              UUID         NOT NULL REFERENCES machines(id),
@@ -179,7 +217,9 @@ CREATE TABLE machine_health_snapshots (
 );
 CREATE INDEX idx_health_machine ON machine_health_snapshots(machine_id, bucket_start DESC);
 
+-- ============================================================
 -- Prediction tables
+-- ============================================================
 CREATE TABLE tool_predictions (
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     machine_id              UUID         NOT NULL REFERENCES machines(id),

@@ -1,17 +1,35 @@
--- V1: Initial SQL Server schema for Manufacturing Monitor
+-- V1: Consolidated SQL Server schema for Manufacturing Monitor
+-- (All columns from original V1 + V3 + V4 + V6 merged. No seed data.)
+
+-- ============================================================
+-- Master tables
+-- ============================================================
 CREATE TABLE machines (
-    id              UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
-    code            VARCHAR(50)      NOT NULL UNIQUE,
-    name            NVARCHAR(200)    NOT NULL,
-    type            VARCHAR(50)      NOT NULL DEFAULT 'CNC_MACHINE',
-    vendor          VARCHAR(50)      NOT NULL DEFAULT 'UNKNOWN',
-    model           NVARCHAR(200),
-    line_id         VARCHAR(50),
-    plant_id        VARCHAR(50),
-    status          VARCHAR(30)      NOT NULL DEFAULT 'OFFLINE',
-    is_enabled      BIT              NOT NULL DEFAULT 1,
-    created_at      DATETIME2(6)     NOT NULL DEFAULT SYSUTCDATETIME(),
-    updated_at      DATETIME2(6)     NOT NULL DEFAULT SYSUTCDATETIME()
+    id                          UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
+    code                        VARCHAR(50)      NOT NULL UNIQUE,
+    name                        NVARCHAR(200)    NOT NULL,
+    type                        VARCHAR(50)      NOT NULL DEFAULT 'CNC_MACHINE',
+    vendor                      VARCHAR(50)      NOT NULL DEFAULT 'UNKNOWN',
+    model                       NVARCHAR(200),
+    line_id                     VARCHAR(50),
+    plant_id                    VARCHAR(50),
+    status                      VARCHAR(30)      NOT NULL DEFAULT 'OFFLINE',
+    is_enabled                  BIT              NOT NULL DEFAULT 1,
+    -- Connection health (was V3)
+    connection_state            VARCHAR(20)      NOT NULL DEFAULT 'OFFLINE',
+    connection_unstable         BIT              NOT NULL DEFAULT 0,
+    last_seen_at                DATETIME2(6),
+    last_telemetry_source_ts    DATETIME2(6),
+    last_telemetry_received_at  DATETIME2(6),
+    latest_accepted_source_ts   DATETIME2(6),
+    last_payload_fingerprint    VARCHAR(500),
+    last_connection_changed_at  DATETIME2(6),
+    connection_flap_count       INT              NOT NULL DEFAULT 0,
+    -- Connection diagnostics (was V6)
+    connection_scope            VARCHAR(30)      NULL,
+    connection_reason           VARCHAR(80)      NULL,
+    created_at                  DATETIME2(6)     NOT NULL DEFAULT SYSUTCDATETIME(),
+    updated_at                  DATETIME2(6)     NOT NULL DEFAULT SYSUTCDATETIME()
 );
 
 CREATE TABLE tool_catalogs (
@@ -42,32 +60,50 @@ CREATE TABLE machine_thresholds (
     CONSTRAINT uq_machine_threshold UNIQUE (machine_id, metric_code)
 );
 
+-- ============================================================
+-- Time-series tables
+-- ============================================================
 CREATE TABLE machine_telemetry (
-    id                  BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-    machine_id          UNIQUEIDENTIFIER     NOT NULL,
-    ts                  DATETIME2(6)         NOT NULL DEFAULT SYSUTCDATETIME(),
-    connection_status   VARCHAR(20),
-    machine_state       VARCHAR(30),
-    operation_mode      VARCHAR(30),
-    alarm_active        BIT                  DEFAULT 0,
-    program_name        NVARCHAR(200),
-    cycle_running       BIT                  DEFAULT 0,
-    current_job         NVARCHAR(200),
-    power_kw            FLOAT,
-    temperature_c       FLOAT,
-    vibration_mm_s      FLOAT,
-    runtime_hours       FLOAT,
-    cycle_time_sec      FLOAT,
-    output_count        INT                  DEFAULT 0,
-    good_count          INT                  DEFAULT 0,
-    reject_count        INT                  DEFAULT 0,
-    spindle_speed_rpm   FLOAT,
-    feed_rate_mm_min    FLOAT,
-    axis_load_pct       FLOAT,
-    metadata_json       NVARCHAR(MAX),
+    id                              BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    machine_id                      UNIQUEIDENTIFIER     NOT NULL,
+    ts                              DATETIME2(6)         NOT NULL DEFAULT SYSUTCDATETIME(),
+    connection_status               VARCHAR(20),
+    machine_state                   VARCHAR(30),
+    operation_mode                  VARCHAR(30),
+    alarm_active                    BIT                  DEFAULT 0,
+    program_name                    NVARCHAR(200),
+    cycle_running                   BIT                  DEFAULT 0,
+    current_job                     NVARCHAR(200),
+    power_kw                        FLOAT,
+    temperature_c                   FLOAT,
+    vibration_mm_s                  FLOAT,
+    runtime_hours                   FLOAT,
+    cycle_time_sec                  FLOAT,
+    output_count                    INT                  DEFAULT 0,
+    good_count                      INT                  DEFAULT 0,
+    reject_count                    INT                  DEFAULT 0,
+    spindle_speed_rpm               FLOAT,
+    feed_rate_mm_min                FLOAT,
+    axis_load_pct                   FLOAT,
+    -- Quality metrics (was V4)
+    quality_score                   FLOAT,
+    is_late_arrival                 BIT                  DEFAULT 0,
+    source_sequence                 BIGINT,
+    -- Extended process telemetry (was V6)
+    ideal_cycle_time_sec            FLOAT,
+    spindle_load_pct                FLOAT,
+    servo_load_pct                  FLOAT,
+    cutting_speed_m_min             FLOAT,
+    depth_of_cut_mm                 FLOAT,
+    feed_per_tooth_mm               FLOAT,
+    width_of_cut_mm                 FLOAT,
+    material_removal_rate_cm3_min   FLOAT,
+    welding_current_a               FLOAT,
+    metadata_json                   NVARCHAR(MAX),
     CONSTRAINT fk_machine_telemetry_machine FOREIGN KEY (machine_id) REFERENCES machines(id)
 );
 CREATE INDEX idx_telemetry_machine_ts ON machine_telemetry(machine_id, ts DESC);
+CREATE INDEX idx_telemetry_quality    ON machine_telemetry(machine_id, is_late_arrival);
 
 CREATE TABLE energy_telemetry (
     id                  BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
@@ -118,6 +154,9 @@ CREATE TABLE maintenance_telemetry (
 );
 CREATE INDEX idx_maint_telemetry_machine_ts ON maintenance_telemetry(machine_id, ts DESC);
 
+-- ============================================================
+-- Event tables
+-- ============================================================
 CREATE TABLE alarm_events (
     id                  UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
     machine_id          UNIQUEIDENTIFIER NOT NULL,
@@ -151,6 +190,9 @@ CREATE TABLE downtime_events (
 );
 CREATE INDEX idx_downtime_machine ON downtime_events(machine_id, started_at DESC);
 
+-- ============================================================
+-- Aggregate tables
+-- ============================================================
 CREATE TABLE oee_snapshots (
     id                      UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
     machine_id              UNIQUEIDENTIFIER NOT NULL,
@@ -185,6 +227,9 @@ CREATE TABLE machine_health_snapshots (
 );
 CREATE INDEX idx_health_machine ON machine_health_snapshots(machine_id, bucket_start DESC);
 
+-- ============================================================
+-- Prediction tables
+-- ============================================================
 CREATE TABLE tool_predictions (
     id                  UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
     machine_id          UNIQUEIDENTIFIER NOT NULL,

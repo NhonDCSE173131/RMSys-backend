@@ -35,10 +35,6 @@ springdoc:
     operations-sorter: alpha
 
 app:
-  simulator:
-    enabled: false
-    interval-ms: 2000
-    machine-count: 5
   connection:
     watchdog-interval-ms: 3000
     stale-threshold-sec: 10
