@@ -16,6 +16,7 @@ public interface AlarmEventRepository extends JpaRepository<AlarmEventEntity, UU
     Optional<AlarmEventEntity> findTopByMachineIdAndAlarmCodeAndIsActiveTrue(UUID machineId, String alarmCode);
     long countByIsActiveTrueAndSeverity(String severity);
     long countByIsActiveTrue();
+    long countByMachineIdAndIsActiveTrue(UUID machineId);
     Page<AlarmEventEntity> findByMachineIdOrderByStartedAtDesc(UUID machineId, Pageable pageable);
     Page<AlarmEventEntity> findAllByOrderByStartedAtDesc(Pageable pageable);
     List<AlarmEventEntity> findByMachineIdAndStartedAtBetween(UUID machineId, Instant from, Instant to);

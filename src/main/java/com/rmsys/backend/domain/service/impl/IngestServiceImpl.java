@@ -34,6 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Set;
@@ -90,6 +91,13 @@ public class IngestServiceImpl implements IngestService {
         saveMaintenanceTelemetryIfPresent(normalizedDto, ts);
         saveToolUsageIfPresent(normalizedDto, ts);
         connectionStateService.markTelemetryReceived(machine, ts, receivedAt, fingerprint, !outOfOrder);
+        if (normalizedDto.connectionStatus() != null && !normalizedDto.connectionStatus().isBlank()) {
+            connectionStateService.markConnectionReported(
+                    machine,
+                    normalizedDto.connectionStatus(),
+                    ts,
+                    normalizedDto.metadata() != null ? normalizedDto.metadata() : Collections.emptyMap());
+        }
 
         if (!outOfOrder) {
             updateMachineStatus(machine, normalizedDto);
@@ -310,7 +318,10 @@ public class IngestServiceImpl implements IngestService {
         payload.put("startStopCount", dto.startStopCount());
         payload.put("lubricationLevelPct", dto.lubricationLevelPct());
         payload.put("batteryLow", dto.batteryLow());
+        payload.put("toolCode", dto.toolCode());
+        payload.put("remainingToolLifePct", dto.remainingToolLifePct());
 
+        sseRegistry.broadcast("machine-snapshot-updated", payload);
         sseRegistry.broadcast("machine-telemetry-updated", payload);
     }
 

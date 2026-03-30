@@ -9,6 +9,7 @@ import jakarta.validation.constraints.PositiveOrZero;
 import lombok.Builder;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 @Builder
@@ -49,6 +50,12 @@ public record IngestTelemetryByCodeRequest(
         @PositiveOrZero Double frequencyHz,
         @PositiveOrZero Double energyKwhShift,
         @PositiveOrZero Double energyKwhDay,
+        @PositiveOrZero Double energyKwhTotal,
+        @PositiveOrZero Integer cycleCount,
+        @PositiveOrZero Integer partCount,
+        @DecimalMin("0.0") @DecimalMax("100.0") Double toolWearPercent,
+        @DecimalMin("0.0") @DecimalMax("100.0") Double maintenanceHealthScore,
+        List<String> alarmHints,
         @PositiveOrZero Double motorTemperatureC,
         @PositiveOrZero Double bearingTemperatureC,
         @PositiveOrZero Double cabinetTemperatureC,

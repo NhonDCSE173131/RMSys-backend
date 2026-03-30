@@ -9,9 +9,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.time.Instant;
+import java.time.Duration;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Comparator;
 
 @Slf4j
 @Service
@@ -26,6 +30,63 @@ public class AggregationServiceImpl implements AggregationService {
     private final MaintenanceTelemetryRepository maintenanceTelemetryRepo;
     private final MaintenancePredictionRepository maintenancePredictionRepo;
 
+    @Value("${app.aggregation.default-sample-sec:1}")
+    private long defaultSampleSec;
+
+    @Value("${app.aggregation.realtime-window-sec:60}")
+    private long realtimeWindowSec;
+
+    @Override
+    @Transactional
+    public void aggregateRealtimeRollingKpis() {
+        Instant now = Instant.now();
+        Instant windowStart = now.minusSeconds(Math.max(5, realtimeWindowSec));
+
+        for (var machine : machineRepo.findAll()) {
+            var records = telemetryRepo.findByMachineIdAndTsBetweenOrderByTsDesc(machine.getId(), windowStart, now);
+            if (records.isEmpty()) {
+                continue;
+            }
+
+            var asc = new ArrayList<>(records);
+            asc.sort(Comparator.comparing(r -> r.getTs()));
+
+            int totalSec = Math.max(1, Math.toIntExact(Duration.between(windowStart, now).toSeconds()));
+            long runningSec = estimateRunningSeconds(asc, now);
+            runningSec = Math.min(runningSec, totalSec);
+
+            int totalOutput = asc.stream().mapToInt(t -> t.getOutputCount() != null ? t.getOutputCount() : 0).max().orElse(0);
+            int goodCount = asc.stream().mapToInt(t -> t.getGoodCount() != null ? t.getGoodCount() : 0).max().orElse(0);
+            int rejectCount = asc.stream().mapToInt(t -> t.getRejectCount() != null ? t.getRejectCount() : 0).max().orElse(0);
+
+            Double idealCycleTime = resolveIdealCycleTimeSec(asc);
+            double availability = (double) runningSec / totalSec * 100;
+            Double performance = (idealCycleTime != null && runningSec > 0)
+                    ? (totalOutput * idealCycleTime) / runningSec * 100
+                    : null;
+            Double quality = totalOutput > 0 ? (double) goodCount / totalOutput * 100 : null;
+            Double oee = (performance != null && quality != null)
+                    ? availability * performance * quality / 10000
+                    : null;
+
+            oeeRepo.save(OeeSnapshotEntity.builder()
+                    .machineId(machine.getId())
+                    .bucketStart(windowStart)
+                    .bucketType("ROLLING_60S")
+                    .availability(Math.min(availability, 100))
+                    .performance(performance != null ? Math.min(performance, 100) : null)
+                    .quality(quality != null ? Math.min(quality, 100) : null)
+                    .oee(oee != null ? Math.min(oee, 100) : null)
+                    .runtimeSec((int) runningSec)
+                    .stopSec(totalSec - (int) runningSec)
+                    .goodCount(goodCount)
+                    .rejectCount(rejectCount)
+                    .actualCycleTimeSec(totalOutput > 0 && runningSec > 0 ? (double) runningSec / totalOutput : null)
+                    .idealCycleTimeSec(idealCycleTime)
+                    .build());
+        }
+    }
+
     @Override
     @Transactional
     public void aggregateOee() {
@@ -35,28 +96,37 @@ public class AggregationServiceImpl implements AggregationService {
         for (var machine : machineRepo.findAll()) {
             var records = telemetryRepo.findByMachineIdAndTsBetweenOrderByTsDesc(machine.getId(), hourAgo, now);
             if (records.isEmpty()) continue;
+            var asc = new ArrayList<>(records);
+            asc.sort(Comparator.comparing(r -> r.getTs()));
 
-            int totalSec = 3600;
-            long runningSec = records.stream().filter(t -> "RUNNING".equals(t.getMachineState())).count() * 2L; // approx by sampling
+            int totalSec = Math.max(1, Math.toIntExact(Duration.between(hourAgo, now).toSeconds()));
+            long runningSec = estimateRunningSeconds(asc, now);
+            runningSec = Math.min(runningSec, totalSec);
             int stopSec = totalSec - (int) runningSec;
 
-            int totalOutput = records.stream().mapToInt(t -> t.getOutputCount() != null ? t.getOutputCount() : 0).max().orElse(0);
-            int goodCount = records.stream().mapToInt(t -> t.getGoodCount() != null ? t.getGoodCount() : 0).max().orElse(0);
-            int rejectCount = records.stream().mapToInt(t -> t.getRejectCount() != null ? t.getRejectCount() : 0).max().orElse(0);
+            int totalOutput = asc.stream().mapToInt(t -> t.getOutputCount() != null ? t.getOutputCount() : 0).max().orElse(0);
+            int goodCount = asc.stream().mapToInt(t -> t.getGoodCount() != null ? t.getGoodCount() : 0).max().orElse(0);
+            int rejectCount = asc.stream().mapToInt(t -> t.getRejectCount() != null ? t.getRejectCount() : 0).max().orElse(0);
 
-            double availability = totalSec > 0 ? (double) runningSec / totalSec * 100 : 0;
-            double idealCycleTime = 30.0; // seconds
-            double performance = runningSec > 0 ? (totalOutput * idealCycleTime) / runningSec * 100 : 0;
-            double quality = totalOutput > 0 ? (double) goodCount / totalOutput * 100 : 100;
-            double oee = availability * performance * quality / 10000;
+            Double idealCycleTime = resolveIdealCycleTimeSec(asc);
+            double availability = (double) runningSec / totalSec * 100;
+            Double performance = (idealCycleTime != null && runningSec > 0)
+                    ? (totalOutput * idealCycleTime) / runningSec * 100
+                    : null;
+            Double quality = totalOutput > 0 ? (double) goodCount / totalOutput * 100 : null;
+            Double oee = (performance != null && quality != null)
+                    ? availability * performance * quality / 10000
+                    : null;
 
             oeeRepo.save(OeeSnapshotEntity.builder()
                     .machineId(machine.getId()).bucketStart(hourAgo).bucketType("HOUR")
-                    .availability(Math.min(availability, 100)).performance(Math.min(performance, 100))
-                    .quality(Math.min(quality, 100)).oee(Math.min(oee, 100))
+                    .availability(Math.min(availability, 100))
+                    .performance(performance != null ? Math.min(performance, 100) : null)
+                    .quality(quality != null ? Math.min(quality, 100) : null)
+                    .oee(oee != null ? Math.min(oee, 100) : null)
                     .runtimeSec((int) runningSec).stopSec(stopSec)
                     .goodCount(goodCount).rejectCount(rejectCount)
-                    .actualCycleTimeSec(runningSec > 0 ? (double) runningSec / Math.max(totalOutput, 1) : 0)
+                    .actualCycleTimeSec(totalOutput > 0 && runningSec > 0 ? (double) runningSec / totalOutput : null)
                     .idealCycleTimeSec(idealCycleTime).build());
         }
         log.info("OEE aggregation completed");
@@ -74,7 +144,7 @@ public class AggregationServiceImpl implements AggregationService {
             var t = latest.get();
             double tempScore = scoreInverse(t.getTemperatureC(), 40, 80);
             double vibScore = scoreInverse(t.getVibrationMmS(), 2, 7);
-            long activeAlarms = alarmRepo.countByIsActiveTrue();
+            long activeAlarms = alarmRepo.countByMachineIdAndIsActiveTrue(machine.getId());
             double alarmScore = Math.max(0, 100 - activeAlarms * 15);
             double runtimeScore = 80; // simplified
 
@@ -102,6 +172,41 @@ public class AggregationServiceImpl implements AggregationService {
         if (temp <= vib && temp <= alarm) return "High temperature";
         if (vib <= alarm) return "High vibration";
         return "Active alarms";
+    }
+
+    private long estimateRunningSeconds(java.util.List<com.rmsys.backend.domain.entity.MachineTelemetryEntity> asc, Instant now) {
+        if (asc.isEmpty()) {
+            return 0;
+        }
+
+        long runningSec = 0;
+        for (int i = 0; i < asc.size(); i++) {
+            var current = asc.get(i);
+            Instant nextTs = (i + 1 < asc.size()) ? asc.get(i + 1).getTs() : now;
+            long deltaSec = Math.max(1, Duration.between(current.getTs(), nextTs).toSeconds());
+            if ("RUNNING".equalsIgnoreCase(current.getMachineState())) {
+                runningSec += Math.min(deltaSec, Math.max(1, defaultSampleSec * 10));
+            }
+        }
+        return runningSec;
+    }
+
+    private Double resolveIdealCycleTimeSec(java.util.List<com.rmsys.backend.domain.entity.MachineTelemetryEntity> asc) {
+        var idealAvg = asc.stream()
+                .map(com.rmsys.backend.domain.entity.MachineTelemetryEntity::getIdealCycleTimeSec)
+                .filter(v -> v != null && v > 0)
+                .mapToDouble(Double::doubleValue)
+                .average();
+        if (idealAvg.isPresent()) {
+            return idealAvg.getAsDouble();
+        }
+
+        var cycleAvg = asc.stream()
+                .map(com.rmsys.backend.domain.entity.MachineTelemetryEntity::getCycleTimeSec)
+                .filter(v -> v != null && v > 0)
+                .mapToDouble(Double::doubleValue)
+                .average();
+        return cycleAvg.isPresent() ? cycleAvg.getAsDouble() : null;
     }
 
     @Override

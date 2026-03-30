@@ -20,9 +20,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -82,8 +84,9 @@ class IngestServiceImplTest {
         verify(maintRepo, never()).save(any());
         verify(toolRepo, never()).save(any());
         verify(connectionStateService, times(1)).markTelemetryReceived(any(), any(), any(), any(), anyBoolean());
-        verify(ruleEngine, times(1)).evaluate(dto);
-        verify(sseRegistry, times(1)).broadcast("machine-telemetry-updated", dto);
+        verify(ruleEngine, times(1)).evaluate(any(NormalizedTelemetryDto.class));
+        verify(sseRegistry, times(1)).broadcast(eq("machine-snapshot-updated"), anyMap());
+        verify(sseRegistry, times(1)).broadcast(eq("machine-telemetry-updated"), anyMap());
     }
 
     @Test
@@ -119,8 +122,34 @@ class IngestServiceImplTest {
         verify(toolRepo, times(1)).save(any());
         verify(connectionStateService, times(1)).markTelemetryReceived(any(), any(), any(), any(), anyBoolean());
         verify(machineRepo, times(1)).save(machine);
-        verify(ruleEngine, times(1)).evaluate(dto);
-        verify(sseRegistry, times(1)).broadcast("machine-telemetry-updated", dto);
+        verify(ruleEngine, times(1)).evaluate(any(NormalizedTelemetryDto.class));
+        verify(sseRegistry, times(1)).broadcast(eq("machine-snapshot-updated"), anyMap());
+        verify(sseRegistry, times(1)).broadcast(eq("machine-telemetry-updated"), anyMap());
+    }
+
+    @Test
+    void ingestTelemetry_withConnectionStatus_reportsConnection() {
+        var machineId = UUID.randomUUID();
+        var machine = MachineEntity.builder()
+                .id(machineId)
+                .code("M-001")
+                .name("Machine 001")
+                .type("CNC")
+                .vendor("TEST")
+                .status("IDLE")
+                .build();
+        when(machineRepo.findById(machineId)).thenReturn(Optional.of(machine));
+        when(qualityService.scoreQuality(any())).thenReturn(98.0);
+
+        var dto = NormalizedTelemetryDto.builder()
+                .machineId(machineId)
+                .connectionStatus("ONLINE")
+                .metadata(Map.of("connectionReason", "PLC_POLL_OK"))
+                .build();
+
+        service.ingestTelemetry(dto);
+
+        verify(connectionStateService, times(1)).markConnectionReported(any(), eq("ONLINE"), any(), anyMap());
     }
 }
 

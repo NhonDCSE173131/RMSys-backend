@@ -13,6 +13,15 @@ public class AggregationScheduler {
 
     private final AggregationService aggregationService;
 
+    @Scheduled(fixedDelayString = "${app.aggregation.realtime-interval-ms:1000}")
+    public void aggregateRealtime() {
+        try {
+            aggregationService.aggregateRealtimeRollingKpis();
+        } catch (Exception e) {
+            log.error("Realtime aggregation error", e);
+        }
+    }
+
     @Scheduled(fixedDelayString = "${app.aggregation.interval-ms:60000}")
     public void aggregate() {
         try {

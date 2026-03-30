@@ -48,6 +48,9 @@ app:
     heartbeat-enabled: true
     heartbeat-interval-ms: 1000
   aggregation:
+    realtime-interval-ms: 1000
+    realtime-window-sec: 60
+    default-sample-sec: 1
     interval-ms: 60000
   ingest:
     api-key: ${APP_INGEST_API_KEY:}
