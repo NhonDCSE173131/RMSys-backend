@@ -15,8 +15,9 @@ public class SseHeartbeatScheduler {
 
     private final SseEmitterRegistry sseRegistry;
 
-    @Scheduled(fixedDelayString = "${app.realtime.heartbeat-interval-ms:15000}")
+    @Scheduled(fixedDelayString = "${app.realtime.heartbeat-interval-ms:1000}")
     public void publishHeartbeat() {
+        sseRegistry.flushTelemetryUpdates();
         if (sseRegistry.getActiveCount() > 0) {
             sseRegistry.sendHeartbeat();
             log.debug("SSE heartbeat sent to {} subscribers", sseRegistry.getActiveCount());

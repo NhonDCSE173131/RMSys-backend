@@ -45,6 +45,12 @@ public class MachineEntity {
     @Builder.Default
     private Boolean connectionUnstable = false;
 
+    @Column(name = "connection_reason", length = 80)
+    private String connectionReason;
+
+    @Column(name = "connection_scope", length = 30)
+    private String connectionScope;
+
     @Column(name = "last_seen_at")
     private Instant lastSeenAt;
 

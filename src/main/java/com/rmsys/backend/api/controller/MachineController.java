@@ -1,6 +1,7 @@
 package com.rmsys.backend.api.controller;
 
 import com.rmsys.backend.api.response.MachineDetailResponse;
+import com.rmsys.backend.api.response.MachineOverviewResponse;
 import com.rmsys.backend.api.response.MachineSnapshotResponse;
 import com.rmsys.backend.api.response.MachineSummaryResponse;
 import com.rmsys.backend.common.response.ApiResponse;
@@ -25,6 +26,12 @@ public class MachineController {
     @Operation(summary = "List all machines")
     public ApiResponse<List<MachineDetailResponse>> list() {
         return ApiResponse.ok(machineService.getAllMachines());
+    }
+
+    @GetMapping("/overview")
+    @Operation(summary = "Get machine overview payloads for all machines")
+    public ApiResponse<List<MachineOverviewResponse>> overviews() {
+        return ApiResponse.ok(machineService.getMachineOverviews());
     }
 
     @GetMapping("/{machineId}")

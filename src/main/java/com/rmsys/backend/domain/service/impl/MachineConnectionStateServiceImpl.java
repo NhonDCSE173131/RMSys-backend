@@ -48,6 +48,9 @@ public class MachineConnectionStateServiceImpl implements MachineConnectionState
             machine.setLatestAcceptedSourceTs(max(machine.getLatestAcceptedSourceTs(), sourceTs));
         }
 
+        machine.setConnectionScope(null);
+        machine.setConnectionReason(null);
+
         if (!ConnectionStatus.ONLINE.name().equals(previousState)) {
             machine.setConnectionState(ConnectionStatus.ONLINE.name());
             registerFlapTransition(machine, receivedAt);
@@ -69,11 +72,9 @@ public class MachineConnectionStateServiceImpl implements MachineConnectionState
         }
 
         machine.setConnectionState(targetState);
-        // When going OFFLINE, clear stale operational status so dashboard/UI
-        // never shows RUNNING for a disconnected machine.
-        if (ConnectionStatus.OFFLINE.name().equals(targetState)) {
-            machine.setStatus("OFFLINE");
-            log.info("Machine {} ({}) went OFFLINE – operational status reset.", machine.getCode(), machine.getName());
+        if (!ConnectionStatus.ONLINE.name().equals(targetState)) {
+            machine.setConnectionScope("BE_WATCHDOG");
+            machine.setConnectionReason("NO_TELEMETRY");
         }
         registerFlapTransition(machine, now);
         emitConnectionChanged(machine, previousState, targetState, now);
@@ -88,6 +89,9 @@ public class MachineConnectionStateServiceImpl implements MachineConnectionState
         if (ConnectionStatus.ONLINE.name().equals(targetState) || ConnectionStatus.STALE.name().equals(targetState)) {
             machine.setLastSeenAt(at);
         }
+
+        machine.setConnectionScope(resolveConnectionScope(metadata, targetState));
+        machine.setConnectionReason(resolveConnectionReason(metadata, targetState));
 
         if (!targetState.equals(previousState)) {
             machine.setConnectionState(targetState);
@@ -174,6 +178,8 @@ public class MachineConnectionStateServiceImpl implements MachineConnectionState
         payload.put("lastSeenAt", machine.getLastSeenAt());
         payload.put("freshnessSec", freshnessSec);
         payload.put("connectionUnstable", Boolean.TRUE.equals(machine.getConnectionUnstable()));
+        payload.put("connectionReason", machine.getConnectionReason());
+        payload.put("connectionScope", machine.getConnectionScope());
         payload.put("ts", at);
         sseRegistry.broadcast("machine-connection-changed", payload);
         sseRegistry.broadcast(eventName, payload);
@@ -214,6 +220,38 @@ public class MachineConnectionStateServiceImpl implements MachineConnectionState
             case "RECOVERING" -> ConnectionStatus.ONLINE.name();
             default -> throw new AppException("VALIDATION_ERROR", "Unsupported connectionStatus: " + reportedState);
         };
+    }
+
+    private String resolveConnectionScope(Map<String, Object> metadata, String targetState) {
+        if (ConnectionStatus.ONLINE.name().equals(targetState)) {
+            return null;
+        }
+        String value = pickMetadataString(metadata, "connectionScope", "disconnectScope", "scope");
+        return value != null ? value : "COLLECTOR";
+    }
+
+    private String resolveConnectionReason(Map<String, Object> metadata, String targetState) {
+        if (ConnectionStatus.ONLINE.name().equals(targetState)) {
+            return null;
+        }
+        String value = pickMetadataString(metadata, "connectionReason", "reason", "disconnectReason");
+        return value != null ? value : "NETWORK_LOSS";
+    }
+
+    private String pickMetadataString(Map<String, Object> metadata, String... keys) {
+        if (metadata == null || metadata.isEmpty()) {
+            return null;
+        }
+        for (String key : keys) {
+            Object value = metadata.get(key);
+            if (value != null) {
+                String normalized = value.toString().trim();
+                if (!normalized.isBlank()) {
+                    return normalized;
+                }
+            }
+        }
+        return null;
     }
 }
 

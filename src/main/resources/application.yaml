@@ -47,8 +47,10 @@ app:
     unstable-flap-threshold: 3
   realtime:
     sse-timeout-ms: 300000
+    replay-buffer-size: 500
+    telemetry-throttle-enabled: true
     heartbeat-enabled: true
-    heartbeat-interval-ms: 15000
+    heartbeat-interval-ms: 1000
   aggregation:
     interval-ms: 60000
   ingest:

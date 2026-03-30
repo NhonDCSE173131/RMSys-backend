@@ -65,6 +65,20 @@ class MachineConnectionStateServiceImplTest {
     }
 
     @Test
+    void evaluateByWatchdog_offlineTransitionKeepsOperationalStatus() {
+        var now = Instant.now();
+        var machine = baseMachine();
+        machine.setStatus("RUNNING");
+        machine.setConnectionState(ConnectionStatus.ONLINE.name());
+        machine.setLastSeenAt(now.minusSeconds(45));
+
+        service.evaluateByWatchdog(machine, now);
+
+        assertEquals(ConnectionStatus.OFFLINE.name(), machine.getConnectionState());
+        assertEquals("RUNNING", machine.getStatus());
+    }
+
+    @Test
     void markTelemetryReceived_fromOffline_toOnlineEmitsOnlineEvent() {
         var machine = baseMachine();
         machine.setConnectionState(ConnectionStatus.OFFLINE.name());
@@ -130,6 +144,8 @@ class MachineConnectionStateServiceImplTest {
         service.markConnectionReported(machine, "DEGRADED", now, Map.of("readLatencyMs", 1500));
 
         assertEquals(ConnectionStatus.STALE.name(), machine.getConnectionState());
+        assertEquals("COLLECTOR", machine.getConnectionScope());
+        assertEquals("NETWORK_LOSS", machine.getConnectionReason());
         verify(sseRegistry).broadcast(eq("machine-connection-stale"), any());
         verify(sseRegistry).broadcast(eq("machine-connection-reported"), any());
     }

@@ -1,26 +1,9 @@
 package com.rmsys.backend.api.response;
 
 import lombok.Builder;
-import java.time.Instant;
-import java.util.UUID;
 
 @Builder
-public record MachineSnapshotResponse(
-        UUID machineId,
-        String machineCode,
-        String machineName,
-        Instant ts,
-        String connectionStatus,
-        String connectionState,
-        Boolean connectionUnstable,
-        String connectionReason,
-        String connectionScope,
-        Instant lastSeenAt,
-        Long dataFreshnessSec,
-        String machineState,
-        String operationMode,
-        String programName,
-        Boolean cycleRunning,
+public record MachineOverviewTelemetry(
         Double powerKw,
         Double temperatureC,
         Double vibrationMmS,
@@ -31,6 +14,19 @@ public record MachineSnapshotResponse(
         Integer rejectCount,
         Double spindleSpeedRpm,
         Double feedRateMmMin,
+        Double voltageV,
+        Double currentA,
+        Double powerFactor,
+        Double frequencyHz,
+        Double energyKwhShift,
+        Double energyKwhDay,
+        Double motorTemperatureC,
+        Double bearingTemperatureC,
+        Double cabinetTemperatureC,
+        Double servoOnHours,
+        Integer startStopCount,
+        Double lubricationLevelPct,
+        Boolean batteryLow,
         Double idealCycleTimeSec,
         Double spindleLoadPct,
         Double servoLoadPct,

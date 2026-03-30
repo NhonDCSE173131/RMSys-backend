@@ -1,6 +1,11 @@
 package com.rmsys.backend.domain.service.impl;
 
 import com.rmsys.backend.api.response.MachineDetailResponse;
+import com.rmsys.backend.api.response.MachineOverviewAnalytics;
+import com.rmsys.backend.api.response.MachineOverviewMaintenance;
+import com.rmsys.backend.api.response.MachineOverviewResponse;
+import com.rmsys.backend.api.response.MachineOverviewTelemetry;
+import com.rmsys.backend.api.response.MachineOverviewTool;
 import com.rmsys.backend.api.response.MachineSnapshotResponse;
 import com.rmsys.backend.api.response.MachineSummaryResponse;
 import com.rmsys.backend.api.response.TelemetryHistoryPointResponse;
@@ -10,7 +15,9 @@ import com.rmsys.backend.domain.entity.MachineEntity;
 import com.rmsys.backend.domain.entity.MachineTelemetryEntity;
 import com.rmsys.backend.domain.repository.AlarmEventRepository;
 import com.rmsys.backend.domain.repository.DowntimeEventRepository;
+import com.rmsys.backend.domain.repository.EnergyTelemetryRepository;
 import com.rmsys.backend.domain.repository.MachineHealthSnapshotRepository;
+import com.rmsys.backend.domain.repository.MaintenanceTelemetryRepository;
 import com.rmsys.backend.domain.repository.MaintenancePredictionRepository;
 import com.rmsys.backend.domain.repository.MachineRepository;
 import com.rmsys.backend.domain.repository.MachineTelemetryRepository;
@@ -22,6 +29,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -45,6 +53,8 @@ public class MachineServiceImpl implements MachineService {
     private final OeeSnapshotRepository oeeRepo;
     private final MachineHealthSnapshotRepository healthRepo;
     private final MaintenancePredictionRepository maintenancePredictionRepo;
+    private final EnergyTelemetryRepository energyTelemetryRepo;
+    private final MaintenanceTelemetryRepository maintenanceTelemetryRepo;
     private final ToolUsageTelemetryRepository toolUsageRepo;
 
     @Override
@@ -55,6 +65,17 @@ public class MachineServiceImpl implements MachineService {
     @Override
     public MachineDetailResponse getMachineDetail(UUID machineId) {
         return toDetail(findMachine(machineId));
+    }
+
+    @Override
+    public List<MachineOverviewResponse> getMachineOverviews() {
+        var machines = machineRepo.findAll();
+        var latestTelemetryMap = telemetryRepo.findLatestForAllMachines().stream()
+                .collect(Collectors.toMap(MachineTelemetryEntity::getMachineId, t -> t, (left, right) -> left));
+
+        return machines.stream()
+                .map(machine -> toOverview(machine, latestTelemetryMap.get(machine.getId())))
+                .toList();
     }
 
     @Override
@@ -188,6 +209,15 @@ public class MachineServiceImpl implements MachineService {
                 .rejectCount(t.getRejectCount())
                 .spindleSpeedRpm(t.getSpindleSpeedRpm())
                 .feedRateMmMin(t.getFeedRateMmMin())
+                .idealCycleTimeSec(t.getIdealCycleTimeSec())
+                .spindleLoadPct(t.getSpindleLoadPct())
+                .servoLoadPct(t.getServoLoadPct())
+                .cuttingSpeedMMin(t.getCuttingSpeedMMin())
+                .depthOfCutMm(t.getDepthOfCutMm())
+                .feedPerToothMm(t.getFeedPerToothMm())
+                .widthOfCutMm(t.getWidthOfCutMm())
+                .materialRemovalRateCm3Min(t.getMaterialRemovalRateCm3Min())
+                .weldingCurrentA(t.getWeldingCurrentA())
                 .axisLoadPct(t.getAxisLoadPct())
                 .qualityScore(t.getQualityScore())
                 .sampleCount(1)
@@ -244,6 +274,15 @@ public class MachineServiceImpl implements MachineService {
                     .rejectCount(last.getRejectCount())
                     .spindleSpeedRpm(last.getSpindleSpeedRpm())
                     .feedRateMmMin(last.getFeedRateMmMin())
+                    .idealCycleTimeSec(last.getIdealCycleTimeSec())
+                    .spindleLoadPct(last.getSpindleLoadPct())
+                    .servoLoadPct(last.getServoLoadPct())
+                    .cuttingSpeedMMin(last.getCuttingSpeedMMin())
+                    .depthOfCutMm(last.getDepthOfCutMm())
+                    .feedPerToothMm(last.getFeedPerToothMm())
+                    .widthOfCutMm(last.getWidthOfCutMm())
+                    .materialRemovalRateCm3Min(last.getMaterialRemovalRateCm3Min())
+                    .weldingCurrentA(last.getWeldingCurrentA())
                     .axisLoadPct(last.getAxisLoadPct())
                     .qualityScore(last.getQualityScore())
                     .sampleCount(points.size())
@@ -267,6 +306,15 @@ public class MachineServiceImpl implements MachineService {
                 .rejectCount(intAgg(points, MachineTelemetryEntity::getRejectCount, agg))
                 .spindleSpeedRpm(numericAgg(points, MachineTelemetryEntity::getSpindleSpeedRpm, agg))
                 .feedRateMmMin(numericAgg(points, MachineTelemetryEntity::getFeedRateMmMin, agg))
+                .idealCycleTimeSec(numericAgg(points, MachineTelemetryEntity::getIdealCycleTimeSec, agg))
+                .spindleLoadPct(numericAgg(points, MachineTelemetryEntity::getSpindleLoadPct, agg))
+                .servoLoadPct(numericAgg(points, MachineTelemetryEntity::getServoLoadPct, agg))
+                .cuttingSpeedMMin(numericAgg(points, MachineTelemetryEntity::getCuttingSpeedMMin, agg))
+                .depthOfCutMm(numericAgg(points, MachineTelemetryEntity::getDepthOfCutMm, agg))
+                .feedPerToothMm(numericAgg(points, MachineTelemetryEntity::getFeedPerToothMm, agg))
+                .widthOfCutMm(numericAgg(points, MachineTelemetryEntity::getWidthOfCutMm, agg))
+                .materialRemovalRateCm3Min(numericAgg(points, MachineTelemetryEntity::getMaterialRemovalRateCm3Min, agg))
+                .weldingCurrentA(numericAgg(points, MachineTelemetryEntity::getWeldingCurrentA, agg))
                 .axisLoadPct(numericAgg(points, MachineTelemetryEntity::getAxisLoadPct, agg))
                 .qualityScore(numericAgg(points, MachineTelemetryEntity::getQualityScore, agg))
                 .sampleCount(points.size())
@@ -349,6 +397,15 @@ public class MachineServiceImpl implements MachineService {
                 .rejectCount(selected.contains("rejectcount") ? point.rejectCount() : null)
                 .spindleSpeedRpm(selected.contains("spindlespeedrpm") ? point.spindleSpeedRpm() : null)
                 .feedRateMmMin(selected.contains("feedratemmmin") ? point.feedRateMmMin() : null)
+                .idealCycleTimeSec(selected.contains("idealcycletimesec") ? point.idealCycleTimeSec() : null)
+                .spindleLoadPct(selected.contains("spindleloadpct") ? point.spindleLoadPct() : null)
+                .servoLoadPct(selected.contains("servoloadpct") ? point.servoLoadPct() : null)
+                .cuttingSpeedMMin(selected.contains("cuttingspeedmmin") ? point.cuttingSpeedMMin() : null)
+                .depthOfCutMm(selected.contains("depthofcutmm") ? point.depthOfCutMm() : null)
+                .feedPerToothMm(selected.contains("feedpertoothmm") ? point.feedPerToothMm() : null)
+                .widthOfCutMm(selected.contains("widthofcutmm") ? point.widthOfCutMm() : null)
+                .materialRemovalRateCm3Min(selected.contains("materialremovalratecm3min") ? point.materialRemovalRateCm3Min() : null)
+                .weldingCurrentA(selected.contains("weldingcurrenta") ? point.weldingCurrentA() : null)
                 .axisLoadPct(selected.contains("axisloadpct") ? point.axisLoadPct() : null)
                 .qualityScore(point.qualityScore())
                 .sampleCount(point.sampleCount())
@@ -358,9 +415,8 @@ public class MachineServiceImpl implements MachineService {
     }
 
     private MachineDetailResponse toDetail(MachineEntity m) {
-        boolean offline = "OFFLINE".equalsIgnoreCase(m.getConnectionState());
-        // When OFFLINE, override operational status so UI never sees stale "RUNNING"
-        String effectiveStatus = offline ? "OFFLINE" : m.getStatus();
+        String operationalState = resolveOperationalState(m, null);
+        String displayState = resolveDisplayState(operationalState, m.getConnectionState());
         return MachineDetailResponse.builder()
                 .id(m.getId())
                 .code(m.getCode())
@@ -370,18 +426,22 @@ public class MachineServiceImpl implements MachineService {
                 .model(m.getModel())
                 .lineId(m.getLineId())
                 .plantId(m.getPlantId())
-                .status(effectiveStatus)
+                .status(displayState)
+                .operationalState(operationalState)
+                .displayState(displayState)
                 .connectionState(m.getConnectionState() != null ? m.getConnectionState() : "OFFLINE")
                 .connectionUnstable(Boolean.TRUE.equals(m.getConnectionUnstable()))
                 .lastSeenAt(m.getLastSeenAt())
+                .dataFreshnessSec(dataFreshnessSec(m))
+                .connectionReason(m.getConnectionReason())
+                .connectionScope(m.getConnectionScope())
                 .isEnabled(m.getIsEnabled())
                 .createdAt(m.getCreatedAt())
                 .build();
     }
 
     private MachineSnapshotResponse toSnapshot(MachineTelemetryEntity t, MachineEntity m) {
-        var now = Instant.now();
-        Long freshnessSec = m.getLastSeenAt() == null ? null : Duration.between(m.getLastSeenAt(), now).toSeconds();
+        Long freshnessSec = dataFreshnessSec(m);
 
         return MachineSnapshotResponse.builder()
                 .machineId(t.getMachineId())
@@ -391,6 +451,8 @@ public class MachineServiceImpl implements MachineService {
                 .connectionStatus(t.getConnectionStatus())
                 .connectionState(m.getConnectionState())
                 .connectionUnstable(Boolean.TRUE.equals(m.getConnectionUnstable()))
+                .connectionReason(m.getConnectionReason())
+                .connectionScope(m.getConnectionScope())
                 .lastSeenAt(m.getLastSeenAt())
                 .dataFreshnessSec(freshnessSec)
                 .machineState(t.getMachineState())
@@ -407,12 +469,20 @@ public class MachineServiceImpl implements MachineService {
                 .rejectCount(t.getRejectCount())
                 .spindleSpeedRpm(t.getSpindleSpeedRpm())
                 .feedRateMmMin(t.getFeedRateMmMin())
+                .idealCycleTimeSec(t.getIdealCycleTimeSec())
+                .spindleLoadPct(t.getSpindleLoadPct())
+                .servoLoadPct(t.getServoLoadPct())
+                .cuttingSpeedMMin(t.getCuttingSpeedMMin())
+                .depthOfCutMm(t.getDepthOfCutMm())
+                .feedPerToothMm(t.getFeedPerToothMm())
+                .widthOfCutMm(t.getWidthOfCutMm())
+                .materialRemovalRateCm3Min(t.getMaterialRemovalRateCm3Min())
+                .weldingCurrentA(t.getWeldingCurrentA())
                 .build();
     }
 
     private MachineSnapshotResponse emptySnapshot(MachineEntity m) {
-        var now = Instant.now();
-        Long freshnessSec = m.getLastSeenAt() == null ? null : Duration.between(m.getLastSeenAt(), now).toSeconds();
+        Long freshnessSec = dataFreshnessSec(m);
 
         return MachineSnapshotResponse.builder()
                 .machineId(m.getId())
@@ -421,10 +491,157 @@ public class MachineServiceImpl implements MachineService {
                 .connectionStatus("OFFLINE")
                 .connectionState(m.getConnectionState() != null ? m.getConnectionState() : "OFFLINE")
                 .connectionUnstable(Boolean.TRUE.equals(m.getConnectionUnstable()))
+                .connectionReason(m.getConnectionReason())
+                .connectionScope(m.getConnectionScope())
                 .lastSeenAt(m.getLastSeenAt())
                 .dataFreshnessSec(freshnessSec)
-                .machineState("OFFLINE")
+                .machineState(resolveDisplayState(resolveOperationalState(m, null), m.getConnectionState()))
                 .build();
+    }
+
+    private MachineOverviewResponse toOverview(MachineEntity machine, MachineTelemetryEntity latestTelemetry) {
+        String connectionState = machine.getConnectionState() != null ? machine.getConnectionState() : "OFFLINE";
+        String operationalState = resolveOperationalState(machine, latestTelemetry);
+        String displayState = resolveDisplayState(operationalState, connectionState);
+
+        var latestOee = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(machine.getId(), "HOUR");
+        var latestHealth = healthRepo.findFirstByMachineIdOrderByBucketStartDesc(machine.getId());
+        var prediction = maintenancePredictionRepo.findFirstByMachineIdOrderByTsDesc(machine.getId());
+        var latestToolUsage = toolUsageRepo.findByMachineIdOrderByTsDesc(machine.getId()).stream().findFirst();
+        var latestEnergy = energyTelemetryRepo.findFirstByMachineIdOrderByTsDesc(machine.getId()).orElse(null);
+        var latestMaintenance = maintenanceTelemetryRepo.findFirstByMachineIdOrderByTsDesc(machine.getId()).orElse(null);
+
+        return MachineOverviewResponse.builder()
+                .machineId(machine.getId())
+                .machineCode(machine.getCode())
+                .machineName(machine.getName())
+                .type(machine.getType())
+                .category(machine.getType() != null ? machine.getType().toLowerCase() : null)
+                .vendor(machine.getVendor())
+                .model(machine.getModel())
+                .lineId(machine.getLineId())
+                .plantId(machine.getPlantId())
+                .operationalState(operationalState)
+                .displayState(displayState)
+                .operationMode(latestTelemetry != null ? latestTelemetry.getOperationMode() : null)
+                .programName(latestTelemetry != null ? latestTelemetry.getProgramName() : null)
+                .cycleRunning(latestTelemetry != null ? latestTelemetry.getCycleRunning() : null)
+                .connectionState(connectionState)
+                .connectionUnstable(Boolean.TRUE.equals(machine.getConnectionUnstable()))
+                .lastSeenAt(machine.getLastSeenAt())
+                .dataFreshnessSec(dataFreshnessSec(machine))
+                .connectionReason(machine.getConnectionReason())
+                .connectionScope(machine.getConnectionScope())
+                .telemetry(toOverviewTelemetry(latestTelemetry, latestEnergy, latestMaintenance))
+                .analytics(MachineOverviewAnalytics.builder()
+                        .oee(latestOee.map(o -> o.getOee()).orElse(null))
+                        .availability(latestOee.map(o -> o.getAvailability()).orElse(null))
+                        .performance(latestOee.map(o -> o.getPerformance()).orElse(null))
+                        .quality(latestOee.map(o -> o.getQuality()).orElse(null))
+                        .machineHealth(latestHealth.map(h -> h.getHealthScore()).orElse(null))
+                        .anomalyScore(null)
+                        .build())
+                .maintenance(toOverviewMaintenance(prediction.orElse(null)))
+                .tool(toOverviewTool(latestToolUsage.orElse(null)))
+                .build();
+    }
+
+    private MachineOverviewTelemetry toOverviewTelemetry(
+            MachineTelemetryEntity telemetry,
+            com.rmsys.backend.domain.entity.EnergyTelemetryEntity energy,
+            com.rmsys.backend.domain.entity.MaintenanceTelemetryEntity maintenance) {
+        if (telemetry == null && energy == null && maintenance == null) {
+            return null;
+        }
+        return MachineOverviewTelemetry.builder()
+                .powerKw(firstNonNull(telemetry != null ? telemetry.getPowerKw() : null, energy != null ? energy.getPowerKw() : null))
+                .temperatureC(telemetry != null ? telemetry.getTemperatureC() : null)
+                .vibrationMmS(firstNonNull(telemetry != null ? telemetry.getVibrationMmS() : null, maintenance != null ? maintenance.getVibrationMmS() : null))
+                .runtimeHours(firstNonNull(telemetry != null ? telemetry.getRuntimeHours() : null, maintenance != null ? maintenance.getRuntimeHours() : null))
+                .cycleTimeSec(telemetry != null ? telemetry.getCycleTimeSec() : null)
+                .outputCount(telemetry != null ? telemetry.getOutputCount() : null)
+                .goodCount(telemetry != null ? telemetry.getGoodCount() : null)
+                .rejectCount(telemetry != null ? telemetry.getRejectCount() : null)
+                .spindleSpeedRpm(telemetry != null ? telemetry.getSpindleSpeedRpm() : null)
+                .feedRateMmMin(telemetry != null ? telemetry.getFeedRateMmMin() : null)
+                .voltageV(energy != null ? energy.getVoltageV() : null)
+                .currentA(energy != null ? energy.getCurrentA() : null)
+                .powerFactor(energy != null ? energy.getPowerFactor() : null)
+                .frequencyHz(energy != null ? energy.getFrequencyHz() : null)
+                .energyKwhShift(energy != null ? energy.getEnergyKwhShift() : null)
+                .energyKwhDay(energy != null ? energy.getEnergyKwhDay() : null)
+                .motorTemperatureC(maintenance != null ? maintenance.getMotorTemperatureC() : null)
+                .bearingTemperatureC(maintenance != null ? maintenance.getBearingTemperatureC() : null)
+                .cabinetTemperatureC(maintenance != null ? maintenance.getCabinetTemperatureC() : null)
+                .servoOnHours(maintenance != null ? maintenance.getServoOnHours() : null)
+                .startStopCount(maintenance != null ? maintenance.getStartStopCount() : null)
+                .lubricationLevelPct(maintenance != null ? maintenance.getLubricationLevelPct() : null)
+                .batteryLow(maintenance != null ? maintenance.getBatteryLow() : null)
+                .idealCycleTimeSec(telemetry != null ? telemetry.getIdealCycleTimeSec() : null)
+                .spindleLoadPct(telemetry != null ? telemetry.getSpindleLoadPct() : null)
+                .servoLoadPct(telemetry != null ? telemetry.getServoLoadPct() : null)
+                .cuttingSpeedMMin(telemetry != null ? telemetry.getCuttingSpeedMMin() : null)
+                .depthOfCutMm(telemetry != null ? telemetry.getDepthOfCutMm() : null)
+                .feedPerToothMm(telemetry != null ? telemetry.getFeedPerToothMm() : null)
+                .widthOfCutMm(telemetry != null ? telemetry.getWidthOfCutMm() : null)
+                .materialRemovalRateCm3Min(telemetry != null ? telemetry.getMaterialRemovalRateCm3Min() : null)
+                .weldingCurrentA(telemetry != null ? telemetry.getWeldingCurrentA() : null)
+                .build();
+    }
+
+    private <T> T firstNonNull(T left, T right) {
+        return left != null ? left : right;
+    }
+
+    private MachineOverviewMaintenance toOverviewMaintenance(com.rmsys.backend.domain.entity.MaintenancePredictionEntity prediction) {
+        if (prediction == null) {
+            return null;
+        }
+        Integer dueDays = null;
+        if (prediction.getNextMaintenanceDate() != null) {
+            dueDays = Math.toIntExact(Math.max(0, ChronoUnit.DAYS.between(Instant.now(), prediction.getNextMaintenanceDate())));
+        }
+        return MachineOverviewMaintenance.builder()
+                .maintenanceDueDays(dueDays)
+                .remainingMaintenanceHours(prediction.getRemainingHoursToService())
+                .nextMaintenanceDate(prediction.getNextMaintenanceDate())
+                .riskLevel(prediction.getRiskLevel())
+                .predictedFailureWindow(null)
+                .recommendation(prediction.getRecommendedAction())
+                .build();
+    }
+
+    private MachineOverviewTool toOverviewTool(com.rmsys.backend.domain.entity.ToolUsageTelemetryEntity toolUsage) {
+        if (toolUsage == null) {
+            return null;
+        }
+        return MachineOverviewTool.builder()
+                .toolCode(toolUsage.getToolCode())
+                .remainingToolLifePct(toolUsage.getRemainingLifePct())
+                .wearLevel(toolUsage.getWearLevel())
+                .build();
+    }
+
+    private String resolveOperationalState(MachineEntity machine, MachineTelemetryEntity latestTelemetry) {
+        if (latestTelemetry != null && latestTelemetry.getMachineState() != null && !latestTelemetry.getMachineState().isBlank()) {
+            return latestTelemetry.getMachineState();
+        }
+        return machine.getStatus();
+    }
+
+    private String resolveDisplayState(String operationalState, String connectionState) {
+        String normalizedConnection = connectionState == null ? "OFFLINE" : connectionState;
+        if (!"ONLINE".equalsIgnoreCase(normalizedConnection)) {
+            return normalizedConnection;
+        }
+        return operationalState;
+    }
+
+    private Long dataFreshnessSec(MachineEntity machine) {
+        if (machine.getLastSeenAt() == null) {
+            return null;
+        }
+        return Duration.between(machine.getLastSeenAt(), Instant.now()).toSeconds();
     }
 }
 

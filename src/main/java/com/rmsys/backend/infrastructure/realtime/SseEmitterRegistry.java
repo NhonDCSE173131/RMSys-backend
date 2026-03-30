@@ -24,20 +24,24 @@ public class SseEmitterRegistry {
     private final Map<String, RealtimeSubscription> subscriptions = new ConcurrentHashMap<>();
     private final long timeout;
     private final int replayBufferSize;
+    private final boolean telemetryThrottleEnabled;
     private final AtomicLong sequence = new AtomicLong(0);
     private final ArrayDeque<SseEventEnvelope> replayBuffer = new ArrayDeque<>();
+    private final Map<UUID, Object> pendingTelemetryByMachine = new ConcurrentHashMap<>();
 
     @Autowired
     public SseEmitterRegistry(
             @Value("${app.realtime.sse-timeout-ms:300000}") long timeout,
-            @Value("${app.realtime.replay-buffer-size:500}") int replayBufferSize) {
+            @Value("${app.realtime.replay-buffer-size:500}") int replayBufferSize,
+            @Value("${app.realtime.telemetry-throttle-enabled:true}") boolean telemetryThrottleEnabled) {
         this.timeout = timeout;
         this.replayBufferSize = replayBufferSize;
+        this.telemetryThrottleEnabled = telemetryThrottleEnabled;
     }
 
     // Backward-compatible overload for tests and direct construction.
     public SseEmitterRegistry(long timeout) {
-        this(timeout, 500);
+        this(timeout, 500, false);
     }
 
     public SseEmitter createEmitter(UUID machineId, String topics, String sinceEventId) {
@@ -66,7 +70,30 @@ public class SseEmitterRegistry {
     }
 
     public void broadcast(String eventName, Object data) {
+        if (shouldThrottleTelemetry(eventName, data)) {
+            pendingTelemetryByMachine.put(extractMachineId(data), data);
+            return;
+        }
+
         var envelope = buildEnvelope(eventName, data);
+        dispatchEnvelope(eventName, envelope);
+    }
+
+    public void flushTelemetryUpdates() {
+        if (!telemetryThrottleEnabled || pendingTelemetryByMachine.isEmpty()) {
+            return;
+        }
+
+        var pending = new java.util.ArrayList<>(pendingTelemetryByMachine.entrySet());
+        pendingTelemetryByMachine.clear();
+
+        for (var entry : pending) {
+            var envelope = buildEnvelope("machine-telemetry-updated", entry.getValue());
+            dispatchEnvelope("machine-telemetry-updated", envelope);
+        }
+    }
+
+    private void dispatchEnvelope(String eventName, SseEventEnvelope envelope) {
         appendReplayBuffer(envelope);
 
         var deadIds = new java.util.ArrayList<String>();
@@ -89,6 +116,18 @@ public class SseEmitterRegistry {
         });
 
         deadIds.forEach(subscriptions::remove);
+    }
+
+    private boolean shouldThrottleTelemetry(String eventName, Object data) {
+        if (!telemetryThrottleEnabled) {
+            return false;
+        }
+        String normalized = toEventType(eventName);
+        if (!"telemetry.updated".equals(normalized)) {
+            return false;
+        }
+        UUID machineId = extractMachineId(data);
+        return machineId != null;
     }
 
     public void sendHeartbeat() {

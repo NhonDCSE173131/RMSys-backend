@@ -1,29 +1,35 @@
 package com.rmsys.backend.api.response;
 
 import lombok.Builder;
+
 import java.time.Instant;
 import java.util.UUID;
 
 @Builder
-public record MachineDetailResponse(
-        UUID id,
-        String code,
-        String name,
+public record MachineOverviewResponse(
+        UUID machineId,
+        String machineCode,
+        String machineName,
         String type,
+        String category,
         String vendor,
         String model,
         String lineId,
         String plantId,
-        String status,
         String operationalState,
         String displayState,
+        String operationMode,
+        String programName,
+        Boolean cycleRunning,
         String connectionState,
         Boolean connectionUnstable,
         Instant lastSeenAt,
         Long dataFreshnessSec,
         String connectionReason,
         String connectionScope,
-        boolean isEnabled,
-        Instant createdAt
+        MachineOverviewTelemetry telemetry,
+        MachineOverviewAnalytics analytics,
+        MachineOverviewMaintenance maintenance,
+        MachineOverviewTool tool
 ) {}
 

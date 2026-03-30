@@ -68,6 +68,33 @@ public class MachineTelemetryEntity {
     @Column(name = "feed_rate_mm_min")
     private Double feedRateMmMin;
 
+    @Column(name = "ideal_cycle_time_sec")
+    private Double idealCycleTimeSec;
+
+    @Column(name = "spindle_load_pct")
+    private Double spindleLoadPct;
+
+    @Column(name = "servo_load_pct")
+    private Double servoLoadPct;
+
+    @Column(name = "cutting_speed_m_min")
+    private Double cuttingSpeedMMin;
+
+    @Column(name = "depth_of_cut_mm")
+    private Double depthOfCutMm;
+
+    @Column(name = "feed_per_tooth_mm")
+    private Double feedPerToothMm;
+
+    @Column(name = "width_of_cut_mm")
+    private Double widthOfCutMm;
+
+    @Column(name = "material_removal_rate_cm3_min")
+    private Double materialRemovalRateCm3Min;
+
+    @Column(name = "welding_current_a")
+    private Double weldingCurrentA;
+
     @Column(name = "axis_load_pct")
     private Double axisLoadPct;
 
