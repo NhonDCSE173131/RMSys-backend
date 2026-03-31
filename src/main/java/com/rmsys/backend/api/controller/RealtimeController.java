@@ -36,16 +36,6 @@ public class RealtimeController {
         return sseRegistry.createEmitter(resolveMachineFilter(machineId), topics, replayFrom);
     }
 
-    @GetMapping(value = "/stream/v2", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    @Operation(summary = "Subscribe to canonical realtime SSE stream")
-    public SseEmitter streamV2(
-            @RequestParam(required = false) String machineId,
-            @RequestParam(required = false, defaultValue = "all") String topics,
-            @RequestParam(required = false) String sinceEventId,
-            @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId) {
-        String replayFrom = sinceEventId != null ? sinceEventId : lastEventId;
-        return sseRegistry.createEmitter(resolveMachineFilter(machineId), topics, replayFrom);
-    }
 
     @GetMapping("/health")
     @Operation(summary = "Get realtime stream health")

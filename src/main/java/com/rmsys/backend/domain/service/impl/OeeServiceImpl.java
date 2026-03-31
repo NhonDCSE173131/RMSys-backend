@@ -33,7 +33,11 @@ public class OeeServiceImpl implements OeeService {
         int count = 0;
 
         for (var m : machines) {
-            var latest = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(m.getId(), "HOUR");
+            // Prefer ROLLING_60S for live data; fallback to HOUR if rolling not available
+            var latest = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(m.getId(), "ROLLING_60S");
+            if (latest.isEmpty()) {
+                latest = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(m.getId(), "HOUR");
+            }
             if (latest.isPresent()) {
                 var s = latest.get();
                 sumA += s.getAvailability() != null ? s.getAvailability() : 0;
@@ -61,10 +65,22 @@ public class OeeServiceImpl implements OeeService {
     public AnalyticsTrendResponse getTrend(Instant from, Instant to, String interval) {
         Instant resolvedTo = to != null ? to : Instant.now();
         Instant resolvedFrom = from != null ? from : resolvedTo.minus(24, ChronoUnit.HOURS);
-        var snapshots = oeeRepo.findByBucketTypeAndBucketStartAfterOrderByBucketStartDesc("HOUR", resolvedFrom).stream()
+
+        // Choose bucket type based on requested interval for live vs analytics
+        String bucketType = resolveBucketTypeForInterval(interval);
+
+        var snapshots = oeeRepo.findByBucketTypeAndBucketStartAfterOrderByBucketStartDesc(bucketType, resolvedFrom).stream()
                 .filter(s -> !s.getBucketStart().isAfter(resolvedTo))
                 .sorted(java.util.Comparator.comparing(s -> s.getBucketStart()))
                 .toList();
+
+        // If rolling data is empty and we asked for rolling, fallback to HOUR
+        if (snapshots.isEmpty() && !"HOUR".equals(bucketType)) {
+            snapshots = oeeRepo.findByBucketTypeAndBucketStartAfterOrderByBucketStartDesc("HOUR", resolvedFrom).stream()
+                    .filter(s -> !s.getBucketStart().isAfter(resolvedTo))
+                    .sorted(java.util.Comparator.comparing(s -> s.getBucketStart()))
+                    .toList();
+        }
 
         var points = snapshots.stream().map(snapshot -> {
             var metrics = new LinkedHashMap<String, Double>();
@@ -89,10 +105,22 @@ public class OeeServiceImpl implements OeeService {
                 .build();
     }
 
+    private String resolveBucketTypeForInterval(String interval) {
+        if (interval == null) return "HOUR";
+        return switch (interval.toLowerCase()) {
+            case "60s", "1m", "rolling", "live" -> "ROLLING_60S";
+            case "5m", "15m", "30m" -> "ROLLING_60S";
+            default -> "HOUR";
+        };
+    }
+
     @Override
     public AnalyticsBreakdownResponse getByMachine() {
         var items = machineRepo.findAll().stream().map(machine -> {
-            var latest = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(machine.getId(), "HOUR");
+            var latest = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(machine.getId(), "ROLLING_60S");
+            if (latest.isEmpty()) {
+                latest = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(machine.getId(), "HOUR");
+            }
             return AnalyticsBreakdownResponse.BreakdownItem.builder()
                     .machineId(machine.getId())
                     .machineCode(machine.getCode())

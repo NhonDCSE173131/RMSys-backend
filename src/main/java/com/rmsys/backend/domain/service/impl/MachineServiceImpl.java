@@ -114,7 +114,10 @@ public class MachineServiceImpl implements MachineService {
                 .filter(d -> d.getStartedAt() != null && d.getStartedAt().isAfter(Instant.now().minus(Duration.ofDays(1))))
                 .count();
 
-        var latestOee = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(machineId, "HOUR");
+        var latestOee = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(machineId, "ROLLING_60S");
+        if (latestOee.isEmpty()) {
+            latestOee = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(machineId, "HOUR");
+        }
         var latestHealth = healthRepo.findFirstByMachineIdOrderByBucketStartDesc(machineId);
         var prediction = maintenancePredictionRepo.findFirstByMachineIdOrderByTsDesc(machineId);
         var latestTool = toolUsageRepo.findByMachineIdOrderByTsDesc(machineId).stream().findFirst();
@@ -453,6 +456,31 @@ public class MachineServiceImpl implements MachineService {
 
     private MachineSnapshotResponse toSnapshot(MachineTelemetryEntity t, MachineEntity m) {
         Long freshnessSec = dataFreshnessSec(m);
+        String connectionState = normalizeConnectionState(m.getConnectionState(), m.getConnectionUnstable());
+        String operationalState = resolveOperationalState(m, t);
+        String displayState = resolveDisplayState(operationalState, connectionState, m.getConnectionUnstable());
+        boolean liveDataAvailable = ConnectionStatus.ONLINE.name().equals(connectionState)
+                || ConnectionStatus.UNSTABLE.name().equals(connectionState);
+
+        UUID mid = m.getId();
+        // OEE — prefer rolling
+        var rollingOee = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(mid, "ROLLING_60S");
+        if (rollingOee.isEmpty()) {
+            rollingOee = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(mid, "HOUR");
+        }
+        var latestHealth = healthRepo.findFirstByMachineIdOrderByBucketStartDesc(mid);
+        var prediction = maintenancePredictionRepo.findFirstByMachineIdOrderByTsDesc(mid);
+        var latestTool = toolUsageRepo.findByMachineIdOrderByTsDesc(mid).stream().findFirst();
+        var latestEnergy = energyTelemetryRepo.findFirstByMachineIdOrderByTsDesc(mid).orElse(null);
+
+        Integer maintenanceDueDays = null;
+        if (prediction.isPresent() && prediction.get().getNextMaintenanceDate() != null) {
+            maintenanceDueDays = Math.toIntExact(Math.max(0,
+                    java.time.temporal.ChronoUnit.DAYS.between(java.time.Instant.now(), prediction.get().getNextMaintenanceDate())));
+        }
+
+        var recentTelemetry = telemetryRepo.findRecentByMachineId(mid, java.time.Instant.now().minus(5, ChronoUnit.MINUTES));
+        Double anomalyScore = computeAnomalyScore(recentTelemetry, t);
 
         return MachineSnapshotResponse.builder()
                 .machineId(t.getMachineId())
@@ -460,13 +488,16 @@ public class MachineServiceImpl implements MachineService {
                 .machineName(m.getName())
                 .ts(t.getTs())
                 .connectionStatus(t.getConnectionStatus())
-                .connectionState(m.getConnectionState())
+                .connectionState(connectionState)
                 .connectionUnstable(Boolean.TRUE.equals(m.getConnectionUnstable()))
                 .connectionReason(m.getConnectionReason())
                 .connectionScope(m.getConnectionScope())
                 .lastSeenAt(m.getLastSeenAt())
                 .dataFreshnessSec(freshnessSec)
+                .liveDataAvailable(liveDataAvailable)
                 .machineState(t.getMachineState())
+                .operationalState(operationalState)
+                .displayState(displayState)
                 .operationMode(t.getOperationMode())
                 .programName(t.getProgramName())
                 .cycleRunning(t.getCycleRunning())
@@ -475,12 +506,12 @@ public class MachineServiceImpl implements MachineService {
                 .vibrationMmS(t.getVibrationMmS())
                 .runtimeHours(t.getRuntimeHours())
                 .cycleTimeSec(t.getCycleTimeSec())
+                .idealCycleTimeSec(t.getIdealCycleTimeSec())
                 .outputCount(t.getOutputCount())
                 .goodCount(t.getGoodCount())
                 .rejectCount(t.getRejectCount())
                 .spindleSpeedRpm(t.getSpindleSpeedRpm())
                 .feedRateMmMin(t.getFeedRateMmMin())
-                .idealCycleTimeSec(t.getIdealCycleTimeSec())
                 .spindleLoadPct(t.getSpindleLoadPct())
                 .servoLoadPct(t.getServoLoadPct())
                 .cuttingSpeedMMin(t.getCuttingSpeedMMin())
@@ -489,6 +520,32 @@ public class MachineServiceImpl implements MachineService {
                 .widthOfCutMm(t.getWidthOfCutMm())
                 .materialRemovalRateCm3Min(t.getMaterialRemovalRateCm3Min())
                 .weldingCurrentA(t.getWeldingCurrentA())
+                // Energy
+                .voltageV(latestEnergy != null ? latestEnergy.getVoltageV() : null)
+                .currentA(latestEnergy != null ? latestEnergy.getCurrentA() : null)
+                .powerFactor(latestEnergy != null ? latestEnergy.getPowerFactor() : null)
+                .frequencyHz(latestEnergy != null ? latestEnergy.getFrequencyHz() : null)
+                .energyKwhShift(latestEnergy != null ? latestEnergy.getEnergyKwhShift() : null)
+                .energyKwhDay(latestEnergy != null ? latestEnergy.getEnergyKwhDay() : null)
+                // Tool
+                .remainingToolLifePct(latestTool.map(tl -> tl.getRemainingLifePct()).orElse(null))
+                .wearLevel(latestTool.map(tl -> tl.getWearLevel()).orElse(null))
+                // OEE
+                .oee(rollingOee.map(o -> o.getOee()).orElse(null))
+                .availability(rollingOee.map(o -> o.getAvailability()).orElse(null))
+                .performance(rollingOee.map(o -> o.getPerformance()).orElse(null))
+                .quality(rollingOee.map(o -> o.getQuality()).orElse(null))
+                // Health & Maintenance
+                .machineHealth(latestHealth.map(h -> h.getHealthScore()).orElse(null))
+                .anomalyScore(anomalyScore)
+                .maintenanceDueDays(maintenanceDueDays)
+                .remainingMaintenanceHours(prediction.map(p -> p.getRemainingHoursToService()).orElse(null))
+                .nextMaintenanceDate(prediction.map(p -> p.getNextMaintenanceDate()).orElse(null))
+                .maintenanceRisk(prediction.map(p -> p.getRiskLevel()).orElse(null))
+                .predictedFailureWindow(prediction.isPresent()
+                        ? resolvePredictedFailureWindow(prediction.get(), latestHealth.map(h -> h.getHealthScore()).orElse(null))
+                        : null)
+                .recommendation(prediction.map(p -> p.getRecommendedAction()).orElse(null))
                 .build();
     }
 
@@ -496,6 +553,7 @@ public class MachineServiceImpl implements MachineService {
         Long freshnessSec = dataFreshnessSec(m);
         String operationalState = resolveOperationalState(m, null);
         String connectionState = normalizeConnectionState(m.getConnectionState(), m.getConnectionUnstable());
+        String displayState = resolveDisplayState(operationalState, connectionState, m.getConnectionUnstable());
 
         return MachineSnapshotResponse.builder()
                 .machineId(m.getId())
@@ -508,7 +566,10 @@ public class MachineServiceImpl implements MachineService {
                 .connectionScope(m.getConnectionScope())
                 .lastSeenAt(m.getLastSeenAt())
                 .dataFreshnessSec(freshnessSec)
-                .machineState(resolveDisplayState(operationalState, connectionState, m.getConnectionUnstable()))
+                .liveDataAvailable(false)
+                .machineState(displayState)
+                .operationalState(operationalState)
+                .displayState(displayState)
                 .build();
     }
 
@@ -517,7 +578,10 @@ public class MachineServiceImpl implements MachineService {
         String operationalState = resolveOperationalState(machine, latestTelemetry);
         String displayState = resolveDisplayState(operationalState, connectionState, machine.getConnectionUnstable());
 
-        var latestOee = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(machine.getId(), "HOUR");
+        var latestOee = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(machine.getId(), "ROLLING_60S");
+        if (latestOee.isEmpty()) {
+            latestOee = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(machine.getId(), "HOUR");
+        }
         var latestHealth = healthRepo.findFirstByMachineIdOrderByBucketStartDesc(machine.getId());
         var prediction = maintenancePredictionRepo.findFirstByMachineIdOrderByTsDesc(machine.getId());
         var latestToolUsage = toolUsageRepo.findByMachineIdOrderByTsDesc(machine.getId()).stream().findFirst();

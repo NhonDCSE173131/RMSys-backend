@@ -2,10 +2,12 @@ package com.rmsys.backend.api.controller;
 
 import com.rmsys.backend.api.response.MachineDetailResponse;
 import com.rmsys.backend.api.response.MachineOverviewResponse;
+import com.rmsys.backend.api.response.MachineRealtimeSnapshotResponse;
 import com.rmsys.backend.api.response.MachineSnapshotResponse;
 import com.rmsys.backend.api.response.MachineSummaryResponse;
 import com.rmsys.backend.common.response.ApiResponse;
 import com.rmsys.backend.domain.service.MachineIdentityResolverService;
+import com.rmsys.backend.domain.service.MachineRealtimeSnapshotService;
 import com.rmsys.backend.domain.service.MachineService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -21,6 +23,7 @@ public class MachineController {
 
     private final MachineService machineService;
     private final MachineIdentityResolverService machineIdentityResolverService;
+    private final MachineRealtimeSnapshotService snapshotService;
 
     @GetMapping
     @Operation(summary = "List all machines")
@@ -56,6 +59,18 @@ public class MachineController {
     @Operation(summary = "Get latest snapshots for all machines")
     public ApiResponse<List<MachineSnapshotResponse>> allSnapshots() {
         return ApiResponse.ok(machineService.getAllLatestSnapshots());
+    }
+
+    @GetMapping("/{machineId}/realtime-snapshot")
+    @Operation(summary = "Get canonical realtime snapshot (same shape as SSE)")
+    public ApiResponse<MachineRealtimeSnapshotResponse> realtimeSnapshot(@PathVariable String machineId) {
+        return ApiResponse.ok(snapshotService.buildSnapshot(machineIdentityResolverService.resolveRequiredId(machineId)));
+    }
+
+    @GetMapping("/realtime-snapshots")
+    @Operation(summary = "Get canonical realtime snapshots for all machines")
+    public ApiResponse<List<MachineRealtimeSnapshotResponse>> allRealtimeSnapshots() {
+        return ApiResponse.ok(snapshotService.buildAllSnapshots());
     }
 }
 

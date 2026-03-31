@@ -1,28 +1,34 @@
 package com.rmsys.backend.api.response;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Builder;
+
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Canonical realtime snapshot for a single machine.
+ * Used as the single shape for:
+ * - REST overview/snapshot endpoints
+ * - SSE machine-snapshot-updated event payload
+ * - Chart seed data
+ */
 @Builder
-public record MachineSnapshotResponse(
+@JsonInclude(JsonInclude.Include.ALWAYS)
+public record MachineRealtimeSnapshotResponse(
         UUID machineId,
         String machineCode,
         String machineName,
         Instant ts,
 
         // Connection
-        String connectionStatus,
         String connectionState,
         Boolean connectionUnstable,
-        String connectionReason,
-        String connectionScope,
         Instant lastSeenAt,
         Long dataFreshnessSec,
         Boolean liveDataAvailable,
 
-        // Operational
-        String machineState,
+        // Operational state
         String operationalState,
         String displayState,
         String operationMode,

@@ -1,5 +1,6 @@
 package com.rmsys.backend.api.controller;
 
+import com.rmsys.backend.api.response.DashboardLiveResponse;
 import com.rmsys.backend.api.response.DashboardOverviewResponse;
 import com.rmsys.backend.common.response.ApiResponse;
 import com.rmsys.backend.domain.service.DashboardService;
@@ -22,6 +23,12 @@ public class DashboardController {
     @Operation(summary = "Get dashboard overview KPIs")
     public ApiResponse<DashboardOverviewResponse> getOverview() {
         return ApiResponse.ok(dashboardService.getOverview());
+    }
+
+    @GetMapping("/live")
+    @Operation(summary = "Get live dashboard snapshot with rolling KPIs")
+    public ApiResponse<DashboardLiveResponse> getLive() {
+        return ApiResponse.ok(dashboardService.getLive());
     }
 }
 

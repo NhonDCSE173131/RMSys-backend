@@ -25,6 +25,7 @@ import com.rmsys.backend.domain.repository.ToolUsageTelemetryRepository;
 import com.rmsys.backend.domain.service.IngestService;
 import com.rmsys.backend.domain.service.MachineConnectionStateService;
 import com.rmsys.backend.domain.service.TelemetryQualityService;
+import com.rmsys.backend.domain.service.MachineRealtimeSnapshotService;
 import com.rmsys.backend.domain.service.RuleEngineService;
 import com.rmsys.backend.infrastructure.realtime.SseEmitterRegistry;
 import lombok.RequiredArgsConstructor;
@@ -56,6 +57,7 @@ public class IngestServiceImpl implements IngestService {
     private final MachineConnectionStateService connectionStateService;
     private final ObjectMapper objectMapper;
     private final TelemetryQualityService qualityService;
+    private final MachineRealtimeSnapshotService snapshotService;
     private static final Set<String> CANONICAL_OPERATING_STATES = Set.of(
             MachineState.RUNNING.name(),
             MachineState.IDLE.name(),
@@ -266,23 +268,30 @@ public class IngestServiceImpl implements IngestService {
     }
 
     private void publishTelemetryEvent(MachineEntity machine, NormalizedTelemetryDto dto, Instant sourceTs, Instant receivedAt) {
-        String operationalState = normalizeOperationalState(dto.machineState() != null ? dto.machineState() : machine.getStatus());
-        String connectionState = normalizeConnectionState(machine.getConnectionState(), machine.getConnectionUnstable());
-        String displayState = resolveDisplayState(operationalState, connectionState);
+        // Build canonical snapshot with full OEE/health/maintenance/tool data
+        var canonicalSnapshot = snapshotService.buildSnapshot(dto.machineId());
 
+        if (canonicalSnapshot != null) {
+            // Primary canonical event — UI only needs this one event
+            sseRegistry.broadcast("machine-snapshot-updated", canonicalSnapshot);
+        }
+
+        // Keep backward-compatible telemetry event with raw fields for existing subscribers
         var payload = new LinkedHashMap<String, Object>();
         payload.put("machineId", dto.machineId());
         payload.put("machineCode", machine.getCode());
         payload.put("sourceTs", sourceTs);
         payload.put("receivedAt", receivedAt);
+        String operationalState = normalizeOperationalState(dto.machineState() != null ? dto.machineState() : machine.getStatus());
+        String connectionState = normalizeConnectionState(machine.getConnectionState(), machine.getConnectionUnstable());
+        String displayState = resolveDisplayState(operationalState, connectionState);
         payload.put("operationalState", operationalState);
         payload.put("displayState", displayState);
         payload.put("connectionState", connectionState);
         payload.put("connectionUnstable", Boolean.TRUE.equals(machine.getConnectionUnstable()));
         payload.put("lastSeenAt", machine.getLastSeenAt());
         payload.put("dataFreshnessSec", machine.getLastSeenAt() == null ? null : Duration.between(machine.getLastSeenAt(), receivedAt).toSeconds());
-        payload.put("connectionReason", machine.getConnectionReason());
-        payload.put("connectionScope", machine.getConnectionScope());
+        payload.put("liveDataAvailable", true);
         payload.put("operationMode", dto.operationMode());
         payload.put("programName", dto.programName());
         payload.put("cycleRunning", dto.cycleRunning());
@@ -311,17 +320,8 @@ public class IngestServiceImpl implements IngestService {
         payload.put("frequencyHz", dto.frequencyHz());
         payload.put("energyKwhShift", dto.energyKwhShift());
         payload.put("energyKwhDay", dto.energyKwhDay());
-        payload.put("motorTemperatureC", dto.motorTemperatureC());
-        payload.put("bearingTemperatureC", dto.bearingTemperatureC());
-        payload.put("cabinetTemperatureC", dto.cabinetTemperatureC());
-        payload.put("servoOnHours", dto.servoOnHours());
-        payload.put("startStopCount", dto.startStopCount());
-        payload.put("lubricationLevelPct", dto.lubricationLevelPct());
-        payload.put("batteryLow", dto.batteryLow());
-        payload.put("toolCode", dto.toolCode());
         payload.put("remainingToolLifePct", dto.remainingToolLifePct());
 
-        sseRegistry.broadcast("machine-snapshot-updated", payload);
         sseRegistry.broadcast("machine-telemetry-updated", payload);
     }
 

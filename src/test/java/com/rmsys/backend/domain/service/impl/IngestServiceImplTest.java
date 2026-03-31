@@ -9,6 +9,7 @@ import com.rmsys.backend.domain.repository.MachineTelemetryRepository;
 import com.rmsys.backend.domain.repository.MaintenanceTelemetryRepository;
 import com.rmsys.backend.domain.repository.ToolUsageTelemetryRepository;
 import com.rmsys.backend.domain.service.MachineConnectionStateService;
+import com.rmsys.backend.domain.service.MachineRealtimeSnapshotService;
 import com.rmsys.backend.domain.service.TelemetryQualityService;
 import com.rmsys.backend.domain.service.RuleEngineService;
 import com.rmsys.backend.infrastructure.realtime.SseEmitterRegistry;
@@ -54,6 +55,8 @@ class IngestServiceImplTest {
     private ObjectMapper objectMapper;
     @Mock
     private TelemetryQualityService qualityService;
+    @Mock
+    private MachineRealtimeSnapshotService snapshotService;
 
     @InjectMocks
     private IngestServiceImpl service;
@@ -71,6 +74,9 @@ class IngestServiceImplTest {
                 .build();
         when(machineRepo.findById(machineId)).thenReturn(Optional.of(machine));
         when(qualityService.scoreQuality(any())).thenReturn(100.0);
+        when(snapshotService.buildSnapshot(machineId)).thenReturn(
+                com.rmsys.backend.api.response.MachineRealtimeSnapshotResponse.builder()
+                        .machineId(machineId).build());
 
         var dto = NormalizedTelemetryDto.builder()
                 .machineId(machineId)
@@ -85,8 +91,8 @@ class IngestServiceImplTest {
         verify(toolRepo, never()).save(any());
         verify(connectionStateService, times(1)).markTelemetryReceived(any(), any(), any(), any(), anyBoolean());
         verify(ruleEngine, times(1)).evaluate(any(NormalizedTelemetryDto.class));
-        verify(sseRegistry, times(1)).broadcast(eq("machine-snapshot-updated"), anyMap());
-        verify(sseRegistry, times(1)).broadcast(eq("machine-telemetry-updated"), anyMap());
+        verify(sseRegistry, times(1)).broadcast(eq("machine-snapshot-updated"), any());
+        verify(sseRegistry, times(1)).broadcast(eq("machine-telemetry-updated"), any(Map.class));
     }
 
     @Test
@@ -103,6 +109,9 @@ class IngestServiceImplTest {
 
         when(machineRepo.findById(machineId)).thenReturn(Optional.of(machine));
         when(qualityService.scoreQuality(any())).thenReturn(95.0);
+        when(snapshotService.buildSnapshot(machineId)).thenReturn(
+                com.rmsys.backend.api.response.MachineRealtimeSnapshotResponse.builder()
+                        .machineId(machineId).build());
 
         var dto = NormalizedTelemetryDto.builder()
                 .machineId(machineId)
@@ -123,8 +132,8 @@ class IngestServiceImplTest {
         verify(connectionStateService, times(1)).markTelemetryReceived(any(), any(), any(), any(), anyBoolean());
         verify(machineRepo, times(1)).save(machine);
         verify(ruleEngine, times(1)).evaluate(any(NormalizedTelemetryDto.class));
-        verify(sseRegistry, times(1)).broadcast(eq("machine-snapshot-updated"), anyMap());
-        verify(sseRegistry, times(1)).broadcast(eq("machine-telemetry-updated"), anyMap());
+        verify(sseRegistry, times(1)).broadcast(eq("machine-snapshot-updated"), any());
+        verify(sseRegistry, times(1)).broadcast(eq("machine-telemetry-updated"), any(Map.class));
     }
 
     @Test
@@ -140,6 +149,9 @@ class IngestServiceImplTest {
                 .build();
         when(machineRepo.findById(machineId)).thenReturn(Optional.of(machine));
         when(qualityService.scoreQuality(any())).thenReturn(98.0);
+        when(snapshotService.buildSnapshot(machineId)).thenReturn(
+                com.rmsys.backend.api.response.MachineRealtimeSnapshotResponse.builder()
+                        .machineId(machineId).build());
 
         var dto = NormalizedTelemetryDto.builder()
                 .machineId(machineId)

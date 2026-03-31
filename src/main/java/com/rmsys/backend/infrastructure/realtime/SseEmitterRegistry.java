@@ -224,6 +224,10 @@ public class SseEmitterRegistry {
         if ("machine.telemetry.updated".equals(normalized) || "telemetry.updated".equals(normalized)) {
             return "telemetry";
         }
+        if ("machine.snapshot.updated".equals(normalized) || "snapshot.updated".equals(normalized)
+                || "snapshot".equals(normalized)) {
+            return "snapshot";
+        }
         if (normalized.startsWith("alarm.")) {
             return "alarm";
         }
@@ -255,6 +259,9 @@ public class SseEmitterRegistry {
             return "unknown";
         }
         String normalized = eventName.toLowerCase().replace('_', '.').replace('-', '.');
+        if (normalized.startsWith("machine.snapshot")) {
+            return "snapshot.updated";
+        }
         if (normalized.startsWith("machine.telemetry")) {
             return "telemetry.updated";
         }

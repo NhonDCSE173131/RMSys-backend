@@ -63,10 +63,13 @@ public class MachineConnectionStateServiceImpl implements MachineConnectionState
     @Override
     public void evaluateByWatchdog(MachineEntity machine, Instant now) {
         var previousState = normalizeState(machine.getConnectionState());
+
+        // Clear unstable flag first if connection has settled, so decideState sees current state
+        clearUnstableIfSettled(machine, now);
+
         var targetState = decideState(machine, now);
 
         if (targetState.equals(previousState)) {
-            clearUnstableIfSettled(machine, now);
             machineRepo.save(machine);
             return;
         }

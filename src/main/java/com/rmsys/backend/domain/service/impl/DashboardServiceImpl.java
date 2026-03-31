@@ -1,5 +1,6 @@
 package com.rmsys.backend.domain.service.impl;
 
+import com.rmsys.backend.api.response.DashboardLiveResponse;
 import com.rmsys.backend.api.response.DashboardOverviewResponse;
 import com.rmsys.backend.api.response.DashboardOverviewResponse.RiskMachineItem;
 import com.rmsys.backend.domain.entity.MachineEntity;
@@ -70,9 +71,12 @@ public class DashboardServiceImpl implements DashboardService {
             }
         }
 
-        // Today OEE - avg from latest snapshots
+        // Today OEE - avg from latest rolling snapshots (prefer ROLLING_60S for live, fallback HOUR)
         double todayOee = machines.stream()
-                .map(m -> oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(m.getId(), "HOUR"))
+                .map(m -> {
+                    var rolling = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(m.getId(), "ROLLING_60S");
+                    return rolling.isPresent() ? rolling : oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(m.getId(), "HOUR");
+                })
                 .filter(java.util.Optional::isPresent).map(java.util.Optional::get)
                 .mapToDouble(s -> s.getOee() != null ? s.getOee() : 0).average().orElse(0);
 
@@ -90,7 +94,11 @@ public class DashboardServiceImpl implements DashboardService {
             energyRepo.findFirstByMachineIdOrderByTsDesc(machine.getId()).ifPresent(e -> {
                 area.energyKwh += e.getEnergyKwhDay() != null ? e.getEnergyKwhDay() : 0;
             });
-            oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(machine.getId(), "HOUR").ifPresent(o -> {
+            var areaOee = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(machine.getId(), "ROLLING_60S");
+            if (areaOee.isEmpty()) {
+                areaOee = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(machine.getId(), "HOUR");
+            }
+            areaOee.ifPresent(o -> {
                 if (o.getOee() != null) {
                     area.oeeSum += o.getOee();
                     area.oeeCount++;
@@ -131,6 +139,93 @@ public class DashboardServiceImpl implements DashboardService {
                 .totalProduction(totalProduction).totalGood(totalGood).totalReject(totalReject)
                 .topRiskMachines(topRisk)
                 .areaSummaries(areaSummaries)
+                .lastUpdatedAt(Instant.now())
+                .build();
+    }
+
+    @Override
+    public DashboardLiveResponse getLive() {
+        var machines = machineRepo.findAll();
+        var latestAll = telemetryRepo.findLatestForAllMachines();
+
+        double totalPower = latestAll.stream()
+                .mapToDouble(t -> t.getPowerKw() != null ? t.getPowerKw() : 0).sum();
+        long totalProduction = latestAll.stream()
+                .mapToLong(t -> t.getOutputCount() != null ? t.getOutputCount() : 0).sum();
+        long totalGood = latestAll.stream()
+                .mapToLong(t -> t.getGoodCount() != null ? t.getGoodCount() : 0).sum();
+        long totalReject = latestAll.stream()
+                .mapToLong(t -> t.getRejectCount() != null ? t.getRejectCount() : 0).sum();
+
+        int running = 0, idle = 0, fault = 0, offline = 0;
+        for (var m : machines) {
+            if ("OFFLINE".equalsIgnoreCase(m.getConnectionState())) {
+                offline++;
+            } else if ("RUNNING".equals(m.getStatus())) {
+                running++;
+            } else if ("FAULT".equals(m.getStatus()) || "STOPPED".equals(m.getStatus())
+                    || "EMERGENCY_STOP".equals(m.getStatus())) {
+                fault++;
+            } else {
+                idle++;
+            }
+        }
+
+        double totalEnergyToday = 0;
+        for (var m : machines) {
+            var latest = energyRepo.findFirstByMachineIdOrderByTsDesc(m.getId());
+            if (latest.isPresent() && latest.get().getEnergyKwhDay() != null) {
+                totalEnergyToday += latest.get().getEnergyKwhDay();
+            }
+        }
+
+        // Avg OEE from rolling snapshots (prefer ROLLING_60S, fallback HOUR)
+        Double avgOee = machines.stream()
+                .map(m -> {
+                    var rolling = oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(m.getId(), "ROLLING_60S");
+                    return rolling.isPresent() ? rolling : oeeRepo.findFirstByMachineIdAndBucketTypeOrderByBucketStartDesc(m.getId(), "HOUR");
+                })
+                .filter(java.util.Optional::isPresent).map(java.util.Optional::get)
+                .mapToDouble(s -> s.getOee() != null ? s.getOee() : 0)
+                .average()
+                .stream().boxed().findFirst().orElse(null);
+
+        long criticalAlarms = alarmRepo.countByIsActiveTrueAndSeverity("CRITICAL");
+        long warningAlarms = alarmRepo.countByIsActiveTrueAndSeverity("WARNING");
+
+        var todayStart = LocalDate.now().atStartOfDay().toInstant(ZoneOffset.UTC);
+        long abnormalStops = downtimeRepo.countByAbnormalStopTrueAndStartedAtAfter(todayStart);
+
+        // Maintenance risk summary
+        var riskSummary = new ArrayList<DashboardLiveResponse.RiskSummaryItem>();
+        for (var m : machines) {
+            healthRepo.findFirstByMachineIdOrderByBucketStartDesc(m.getId()).ifPresent(h -> {
+                if (h.getHealthScore() != null && h.getHealthScore() < 75) {
+                    riskSummary.add(DashboardLiveResponse.RiskSummaryItem.builder()
+                            .machineId(m.getId())
+                            .machineCode(m.getCode())
+                            .riskLevel(h.getRiskLevel())
+                            .healthScore(h.getHealthScore())
+                            .build());
+                }
+            });
+        }
+
+        return DashboardLiveResponse.builder()
+                .totalPowerKw(totalPower)
+                .totalEnergyTodayKwh(totalEnergyToday)
+                .avgOeeRolling(avgOee)
+                .runningMachines(running)
+                .idleMachines(idle)
+                .faultMachines(fault)
+                .offlineMachines(offline)
+                .criticalAlarms(criticalAlarms)
+                .warningAlarms(warningAlarms)
+                .abnormalStops(abnormalStops)
+                .totalProduction(totalProduction)
+                .totalGood(totalGood)
+                .totalReject(totalReject)
+                .maintenanceRiskSummary(riskSummary)
                 .lastUpdatedAt(Instant.now())
                 .build();
     }

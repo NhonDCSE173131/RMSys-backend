@@ -4,6 +4,7 @@ import com.rmsys.backend.api.response.MachineDetailResponse;
 import com.rmsys.backend.api.response.MachineOverviewResponse;
 import com.rmsys.backend.common.exception.GlobalExceptionHandler;
 import com.rmsys.backend.domain.service.MachineIdentityResolverService;
+import com.rmsys.backend.domain.service.MachineRealtimeSnapshotService;
 import com.rmsys.backend.domain.service.MachineService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,6 +36,9 @@ class MachineControllerTest {
 
     @MockitoBean
     private MachineIdentityResolverService machineIdentityResolverService;
+
+    @MockitoBean
+    private MachineRealtimeSnapshotService snapshotService;
 
     @Test
     void overview_returnsBulkPayload() throws Exception {
