@@ -15,6 +15,11 @@ spring:
       write-dates-as-timestamps: false
     default-property-inclusion: non_null
 
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
 server:
   port: 8080
   servlet:
@@ -54,3 +59,12 @@ app:
     interval-ms: 60000
   ingest:
     api-key: ${APP_INGEST_API_KEY:}
+  plc:
+    enabled: ${APP_PLC_ENABLED:true}
+    startup-auto-connect: ${APP_PLC_AUTO_CONNECT:false}
+    reconnect-delay-ms: 3000
+    default-poll-interval-ms: 1000
+    default-timeout-ms: 2000
+  import:
+    max-file-size-mb: 10
+    supported-types: csv

@@ -77,6 +77,51 @@ public class MachineEntity {
     @Builder.Default
     private Boolean isEnabled = true;
 
+    // ---- PLC connection config (V2) ----
+
+    @Column(name = "protocol", length = 50)
+    private String protocol;
+
+    @Column(name = "host", length = 255)
+    private String host;
+
+    @Column(name = "port")
+    private Integer port;
+
+    @Column(name = "unit_id")
+    @Builder.Default
+    private Integer unitId = 1;
+
+    @Column(name = "poll_interval_ms")
+    @Builder.Default
+    private Integer pollIntervalMs = 1000;
+
+    @Column(name = "connection_mode", length = 20)
+    @Builder.Default
+    private String connectionMode = "MANUAL";
+
+    @Column(name = "auto_connect")
+    @Builder.Default
+    private Boolean autoConnect = false;
+
+    @Column(name = "profile_id")
+    private UUID profileId;
+
+    @Column(name = "last_connection_status", length = 30)
+    private String lastConnectionStatus;
+
+    @Column(name = "last_connection_reason", length = 500)
+    private String lastConnectionReasonDetail;
+
+    @Column(name = "last_connected_at")
+    private Instant lastConnectedAt;
+
+    @Column(name = "last_disconnected_at")
+    private Instant lastDisconnectedAt;
+
+    @Column(name = "last_data_at")
+    private Instant lastDataAt;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -85,4 +130,3 @@ public class MachineEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 }
-

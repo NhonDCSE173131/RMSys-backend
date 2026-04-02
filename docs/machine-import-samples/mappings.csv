@@ -1,0 +1,9 @@
+profile_code,logical_key,area,address_start,address_end,data_type,scale_factor,unit,byte_order,word_order,is_required,description
+EASY521_STD,temperature,holding_register,100,,float32,0.1,C,BIG,BIG,true,Main process temperature
+EASY521_STD,powerKw,holding_register,102,,float32,0.1,kW,BIG,BIG,true,Main power consumption
+EASY521_STD,running,coil,1,,bool,1,,BIG,BIG,true,Machine running flag
+EASY521_STD,outputCount,holding_register,110,,uint32,1,pcs,BIG,BIG,false,Produced parts counter
+SIM_STD,temperature,holding_register,100,,float32,1,C,BIG,BIG,true,Sim temperature
+SIM_STD,powerKw,holding_register,102,,float32,1,kW,BIG,BIG,true,Sim power
+SIM_STD,running,coil,1,,bool,1,,BIG,BIG,true,Sim running flag
+
