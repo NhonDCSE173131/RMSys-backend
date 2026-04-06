@@ -21,6 +21,7 @@ public class MachineConfigResponse {
     private String connectionMode;
     private Boolean autoConnect;
     private UUID profileId;
+    private UUID mappingFileId;
     private String profileCode;
     private String lineId;
     private String plantId;

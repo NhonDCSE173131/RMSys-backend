@@ -10,7 +10,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "machine_profile_mappings",
-       uniqueConstraints = @UniqueConstraint(columnNames = {"profile_id", "logical_key"}))
+       uniqueConstraints = @UniqueConstraint(columnNames = {"profile_id", "mapping_file_id", "logical_key"}))
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class MachineProfileMappingEntity {
 
@@ -20,6 +20,9 @@ public class MachineProfileMappingEntity {
 
     @Column(name = "profile_id", nullable = false)
     private UUID profileId;
+
+    @Column(name = "mapping_file_id")
+    private UUID mappingFileId;
 
     @Column(name = "logical_key", nullable = false, length = 100)
     private String logicalKey;

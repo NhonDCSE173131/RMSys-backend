@@ -12,13 +12,13 @@ import java.util.UUID;
 
 @Tag(name = "Machine Connections", description = "Runtime PLC connection management")
 @RestController
-@RequestMapping("/api/v1/machine-connections")
+@RequestMapping({"/api/v1/machine-configs", "/api/v1/machine-connections"})
 @RequiredArgsConstructor
 public class MachineConnectionController {
 
     private final MachineConnectionService connectionService;
 
-    @PostMapping("/{machineId}/test")
+    @PostMapping({"/{machineId}/test-connection", "/{machineId}/test"})
     @Operation(summary = "Test connection to a machine's PLC")
     public ApiResponse<MachineConnectionStatusResponse> testConnection(@PathVariable UUID machineId) {
         return ApiResponse.ok(connectionService.testConnection(machineId));
@@ -49,10 +49,10 @@ public class MachineConnectionController {
     }
 
     @PostMapping("/start-all")
-    @Operation(summary = "Start auto-connect for all machines with autoConnect=true")
+    @Operation(summary = "Start auto-connect for eligible machines (autoConnect=true, enabled=true)")
     public ApiResponse<Void> startAll() {
         connectionService.startAll();
-        return ApiResponse.ok(null, "Auto-connect started for all eligible machines");
+        return ApiResponse.ok(null, "Auto-connect started for eligible machines");
     }
 }
 

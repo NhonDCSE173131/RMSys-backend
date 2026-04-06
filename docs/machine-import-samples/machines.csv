@@ -1,0 +1,2 @@
+machine_code,machine_name,protocol,host,port,unit_id,profile_code,poll_interval_ms,auto_connect,type,vendor,model,line_id,plant_id,description
+M01,Machine 01,modbus-tcp,127.0.0.1,15021,1,EASY521_STD,1000,true,CNC,Easy521,Easy521-STD,LINE_A,PLANT_01,May test local

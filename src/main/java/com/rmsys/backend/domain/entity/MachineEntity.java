@@ -107,6 +107,9 @@ public class MachineEntity {
     @Column(name = "profile_id")
     private UUID profileId;
 
+    @Column(name = "mapping_file_id")
+    private UUID mappingFileId;
+
     @Column(name = "last_connection_status", length = 30)
     private String lastConnectionStatus;
 

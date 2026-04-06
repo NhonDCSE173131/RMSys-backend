@@ -3,7 +3,9 @@ package com.rmsys.backend.domain.service.impl;
 import com.rmsys.backend.common.enumtype.PlcConnectionStatus;
 import com.rmsys.backend.domain.dto.NormalizedTelemetryDto;
 import com.rmsys.backend.domain.entity.MachineEntity;
+import com.rmsys.backend.domain.entity.MachineImportBatchEntity;
 import com.rmsys.backend.domain.entity.MachineProfileMappingEntity;
+import com.rmsys.backend.domain.repository.MachineImportBatchRepository;
 import com.rmsys.backend.domain.repository.MachineProfileMappingRepository;
 import com.rmsys.backend.domain.repository.MachineRepository;
 import com.rmsys.backend.domain.service.IngestService;
@@ -32,6 +34,7 @@ public class PlcConnectionManagerImpl implements PlcConnectionManager {
 
     private final MachineRepository machineRepo;
     private final MachineProfileMappingRepository mappingRepo;
+    private final MachineImportBatchRepository batchRepo;
     private final DeviceAdapterFactory adapterFactory;
     private final MachineMappingService mappingService;
     private final IngestService ingestService;
@@ -57,11 +60,13 @@ public class PlcConnectionManagerImpl implements PlcConnectionManager {
 
     public PlcConnectionManagerImpl(MachineRepository machineRepo,
                                     MachineProfileMappingRepository mappingRepo,
+                                    MachineImportBatchRepository batchRepo,
                                     DeviceAdapterFactory adapterFactory,
                                     MachineMappingService mappingService,
                                     IngestService ingestService) {
         this.machineRepo = machineRepo;
         this.mappingRepo = mappingRepo;
+        this.batchRepo = batchRepo;
         this.adapterFactory = adapterFactory;
         this.mappingService = mappingService;
         this.ingestService = ingestService;
@@ -172,7 +177,7 @@ public class PlcConnectionManagerImpl implements PlcConnectionManager {
     @Override
     public void startAutoConnectAll() {
         List<MachineEntity> machines = machineRepo.findByAutoConnectTrueAndIsEnabledTrue();
-        log.info("Auto-connecting {} machines...", machines.size());
+        log.info("Auto-connecting {} eligible machines (autoConnect=true, enabled=true)...", machines.size());
         for (MachineEntity machine : machines) {
             try {
                 startConnection(machine.getId());
@@ -324,6 +329,31 @@ public class PlcConnectionManagerImpl implements PlcConnectionManager {
             log.warn("Machine {} has no profile assigned, using empty mappings", machine.getCode());
             return List.of();
         }
+
+        // 1) Explicit mapping file selected on machine
+        if (machine.getMappingFileId() != null) {
+            List<MachineProfileMappingEntity> selected = mappingRepo
+                    .findByMappingFileIdOrderByAddressStartAsc(machine.getMappingFileId());
+            if (!selected.isEmpty()) {
+                return selected;
+            }
+            log.warn("Machine {} references mappingFileId {} but no mappings found, trying fallback",
+                    machine.getCode(), machine.getMappingFileId());
+        }
+
+        // 2) Fallback to latest completed mapping batch for this profile
+        List<MachineImportBatchEntity> latestBatches = batchRepo
+                .findByProfileIdAndImportTypeAndStatusOrderByCreatedAtDesc(machine.getProfileId(), "MAPPINGS", "COMPLETED");
+        if (!latestBatches.isEmpty()) {
+            UUID latestFileId = latestBatches.get(0).getId();
+            List<MachineProfileMappingEntity> latest = mappingRepo
+                    .findByProfileIdAndMappingFileIdOrderByAddressStartAsc(machine.getProfileId(), latestFileId);
+            if (!latest.isEmpty()) {
+                return latest;
+            }
+        }
+
+        // 3) Legacy fallback (before mapping_file_id existed)
         return mappingRepo.findByProfileIdOrderByAddressStartAsc(machine.getProfileId());
     }
 

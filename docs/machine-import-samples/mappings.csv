@@ -1,9 +1,14 @@
-profile_code,logical_key,area,address_start,address_end,data_type,scale_factor,unit,byte_order,word_order,is_required,description
-EASY521_STD,temperature,holding_register,100,,float32,0.1,C,BIG,BIG,true,Main process temperature
-EASY521_STD,powerKw,holding_register,102,,float32,0.1,kW,BIG,BIG,true,Main power consumption
-EASY521_STD,running,coil,1,,bool,1,,BIG,BIG,true,Machine running flag
-EASY521_STD,outputCount,holding_register,110,,uint32,1,pcs,BIG,BIG,false,Produced parts counter
-SIM_STD,temperature,holding_register,100,,float32,1,C,BIG,BIG,true,Sim temperature
-SIM_STD,powerKw,holding_register,102,,float32,1,kW,BIG,BIG,true,Sim power
-SIM_STD,running,coil,1,,bool,1,,BIG,BIG,true,Sim running flag
-
+profile_code,logical_key,area,address,bit_index,data_type,scale,unit,byte_order,word_order,required,description
+EASY521_STD,temperature,HOLDING,100,,FLOAT32,1,C,BIG,BIG,true,Nhiet do may
+EASY521_STD,powerKw,HOLDING,102,,FLOAT32,1,kW,BIG,BIG,false,Cong suat
+EASY521_STD,spindleSpeedRpm,HOLDING,104,,FLOAT32,1,RPM,BIG,BIG,false,Toc do truc chinh
+EASY521_STD,running,COIL,10,,BOOL,1,,,,true,Trang thai chay
+EASY521_STD,alarmCode,HOLDING,120,,UINT16,1,,BIG,BIG,false,Ma loi
+EASY521_STD,outputCount,HOLDING,130,,UINT32,1,pcs,BIG,BIG,false,Tong san luong
+EASY521_STD,goodCount,HOLDING,132,,UINT32,1,pcs,BIG,BIG,false,San pham dat
+EASY521_STD,rejectCount,HOLDING,134,,UINT32,1,pcs,BIG,BIG,false,San pham loi
+EASY521_STD,runtimeHours,HOLDING,136,,FLOAT32,1,h,BIG,BIG,false,Tong gio chay
+EASY521_STD,cycleTimeSec,HOLDING,138,,FLOAT32,1,s,BIG,BIG,false,Chu ky san xuat
+EASY521_STD,vibrationMmS,HOLDING,140,,FLOAT32,1,mm/s,BIG,BIG,false,Do rung
+EASY521_STD,voltageV,HOLDING,142,,FLOAT32,1,V,BIG,BIG,false,Dien ap
+EASY521_STD,currentA,HOLDING,144,,FLOAT32,1,A,BIG,BIG,false,Dong dien

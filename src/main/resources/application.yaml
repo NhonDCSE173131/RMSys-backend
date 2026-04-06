@@ -61,7 +61,7 @@ app:
     api-key: ${APP_INGEST_API_KEY:}
   plc:
     enabled: ${APP_PLC_ENABLED:true}
-    startup-auto-connect: ${APP_PLC_AUTO_CONNECT:false}
+    startup-auto-connect: ${APP_PLC_AUTO_CONNECT:true}
     reconnect-delay-ms: 3000
     default-poll-interval-ms: 1000
     default-timeout-ms: 2000

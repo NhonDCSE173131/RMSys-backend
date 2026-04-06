@@ -8,6 +8,7 @@ import java.util.UUID;
 public class MachineMappingResponse {
     private UUID id;
     private UUID profileId;
+    private UUID mappingFileId;
     private String logicalKey;
     private String area;
     private Integer addressStart;

@@ -1,0 +1,2 @@
+profile_code,profile_name,protocol,vendor,model,description
+EASY521_STD,Easy521 Standard,modbus-tcp,Easy521,Easy521-STD,Profile cho M01 local test

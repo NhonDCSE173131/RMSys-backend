@@ -41,6 +41,16 @@ public class MachineImportBatchEntity {
     @Column(name = "error_summary", columnDefinition = "NVARCHAR(MAX)")
     private String errorSummary;
 
+    @Column(name = "profile_code", length = 100)
+    private String profileCode;
+
+    @Column(name = "profile_id")
+    private UUID profileId;
+
+    @Column(name = "uploaded_by", length = 100)
+    @Builder.Default
+    private String uploadedBy = "system";
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

@@ -26,8 +26,10 @@ public class MachineUpdateRequest {
     @Size(max = 255)
     private String host;
 
+    @Positive(message = "Port must be positive")
     private Integer port;
 
+    @Positive(message = "Unit ID must be positive")
     private Integer unitId;
 
     @Positive(message = "Poll interval must be positive")
@@ -36,6 +38,8 @@ public class MachineUpdateRequest {
     private Boolean autoConnect;
 
     private UUID profileId;
+
+    private UUID mappingFileId;
 
     @Size(max = 50)
     private String lineId;

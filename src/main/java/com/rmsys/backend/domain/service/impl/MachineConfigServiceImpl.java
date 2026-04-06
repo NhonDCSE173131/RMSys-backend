@@ -5,7 +5,9 @@ import com.rmsys.backend.api.request.MachineUpdateRequest;
 import com.rmsys.backend.api.response.MachineConfigResponse;
 import com.rmsys.backend.common.exception.AppException;
 import com.rmsys.backend.domain.entity.MachineEntity;
+import com.rmsys.backend.domain.entity.MachineImportBatchEntity;
 import com.rmsys.backend.domain.entity.MachineProfileEntity;
+import com.rmsys.backend.domain.repository.MachineImportBatchRepository;
 import com.rmsys.backend.domain.repository.MachineProfileRepository;
 import com.rmsys.backend.domain.repository.MachineRepository;
 import com.rmsys.backend.domain.service.MachineConfigService;
@@ -31,6 +33,7 @@ public class MachineConfigServiceImpl implements MachineConfigService {
 
     private final MachineRepository machineRepo;
     private final MachineProfileRepository profileRepo;
+    private final MachineImportBatchRepository batchRepo;
     private final PlcConnectionManager plcConnectionManager;
 
     @Override
@@ -42,23 +45,24 @@ public class MachineConfigServiceImpl implements MachineConfigService {
                     "Machine code already exists: " + req.getCode());
         }
 
-        // Validate protocol
-        if (req.getProtocol() != null && !SUPPORTED_PROTOCOLS.contains(req.getProtocol().toLowerCase())) {
-            throw new AppException("UNSUPPORTED_PROTOCOL",
-                    "Protocol not supported: " + req.getProtocol());
-        }
+        String protocol = normalizeProtocol(req.getProtocol());
 
         // Validate profile
         String profileCode = null;
-        if (req.getProfileId() != null) {
-            MachineProfileEntity profile = profileRepo.findById(req.getProfileId())
-                    .orElseThrow(() -> AppException.notFound("MachineProfile", req.getProfileId()));
-            profileCode = profile.getProfileCode();
+        if (req.getProfileId() == null) {
+            throw new AppException("PROFILE_REQUIRED", "Profile is required");
         }
+        MachineProfileEntity profile = profileRepo.findById(req.getProfileId())
+                .orElseThrow(() -> AppException.notFound("MachineProfile", req.getProfileId()));
+        profileCode = profile.getProfileCode();
+
+        validateMappingFileSelection(req.getProfileId(), req.getMappingFileId());
+
+        validateNetworkFieldsForProtocol(protocol, req.getHost(), req.getPort(), req.getUnitId());
 
         // Default port for modbus-tcp
         Integer port = req.getPort();
-        if (port == null && "modbus-tcp".equalsIgnoreCase(req.getProtocol())) {
+        if (port == null && "modbus-tcp".equalsIgnoreCase(protocol)) {
             port = 502;
         }
 
@@ -71,25 +75,26 @@ public class MachineConfigServiceImpl implements MachineConfigService {
                 .lineId(req.getLineId())
                 .plantId(req.getPlantId())
                 .status("OFFLINE")
-                .protocol(req.getProtocol())
+                .protocol(protocol)
                 .host(req.getHost())
                 .port(port)
                 .unitId(req.getUnitId() != null ? req.getUnitId() : 1)
                 .pollIntervalMs(req.getPollIntervalMs() != null ? req.getPollIntervalMs() : 1000)
                 .autoConnect(req.getAutoConnect() != null && req.getAutoConnect())
                 .profileId(req.getProfileId())
+                .mappingFileId(req.getMappingFileId())
                 .connectionMode("MANUAL")
                 .build();
 
         machine = machineRepo.save(machine);
         log.info("Created machine config: {} ({})", machine.getCode(), machine.getId());
 
-        // Auto-connect if requested
-        if (Boolean.TRUE.equals(machine.getAutoConnect())) {
+        // Auto-connect only when machine is explicitly eligible.
+        if (Boolean.TRUE.equals(machine.getIsEnabled()) && Boolean.TRUE.equals(machine.getAutoConnect())) {
             try {
                 plcConnectionManager.startConnection(machine.getId());
             } catch (Exception e) {
-                log.warn("Auto-connect failed for machine {}: {}", machine.getCode(), e.getMessage());
+                log.warn("Immediate connect failed for machine {}: {}", machine.getCode(), e.getMessage());
             }
         }
 
@@ -107,11 +112,7 @@ public class MachineConfigServiceImpl implements MachineConfigService {
         if (req.getVendor() != null) machine.setVendor(req.getVendor());
         if (req.getModel() != null) machine.setModel(req.getModel());
         if (req.getProtocol() != null) {
-            if (!SUPPORTED_PROTOCOLS.contains(req.getProtocol().toLowerCase())) {
-                throw new AppException("UNSUPPORTED_PROTOCOL",
-                        "Protocol not supported: " + req.getProtocol());
-            }
-            machine.setProtocol(req.getProtocol());
+            machine.setProtocol(normalizeProtocol(req.getProtocol()));
         }
         if (req.getHost() != null) machine.setHost(req.getHost());
         if (req.getPort() != null) machine.setPort(req.getPort());
@@ -123,8 +124,27 @@ public class MachineConfigServiceImpl implements MachineConfigService {
                     .orElseThrow(() -> AppException.notFound("MachineProfile", req.getProfileId()));
             machine.setProfileId(req.getProfileId());
         }
+        if (req.getMappingFileId() != null) {
+            UUID profileIdForValidation = machine.getProfileId();
+            validateMappingFileSelection(profileIdForValidation, req.getMappingFileId());
+            machine.setMappingFileId(req.getMappingFileId());
+        }
         if (req.getLineId() != null) machine.setLineId(req.getLineId());
         if (req.getPlantId() != null) machine.setPlantId(req.getPlantId());
+
+        if ("modbus-tcp".equalsIgnoreCase(machine.getProtocol())) {
+            if (machine.getPort() == null) {
+                machine.setPort(502);
+            }
+            if (machine.getUnitId() == null) {
+                machine.setUnitId(1);
+            }
+        }
+
+        if (machine.getProfileId() == null) {
+            throw new AppException("PROFILE_REQUIRED", "Profile is required");
+        }
+        validateNetworkFieldsForProtocol(machine.getProtocol(), machine.getHost(), machine.getPort(), machine.getUnitId());
 
         machine = machineRepo.save(machine);
         log.info("Updated machine config: {} ({})", machine.getCode(), machine.getId());
@@ -175,11 +195,58 @@ public class MachineConfigServiceImpl implements MachineConfigService {
 
     // ---- helpers ----
 
+    private String normalizeProtocol(String protocol) {
+        if (protocol == null || protocol.isBlank()) {
+            throw new AppException("PROTOCOL_REQUIRED", "Protocol is required");
+        }
+        String normalized = protocol.trim().toLowerCase();
+        if (!SUPPORTED_PROTOCOLS.contains(normalized)) {
+            throw new AppException("UNSUPPORTED_PROTOCOL", "Protocol not supported: " + protocol);
+        }
+        return normalized;
+    }
+
+    private void validateNetworkFieldsForProtocol(String protocol, String host, Integer port, Integer unitId) {
+        if (!"modbus-tcp".equalsIgnoreCase(protocol)) {
+            return;
+        }
+        if (host == null || host.isBlank()) {
+            throw new AppException("HOST_REQUIRED", "Host is required for modbus-tcp machines");
+        }
+        if (port != null && port <= 0) {
+            throw new AppException("INVALID_PORT", "Port must be greater than 0");
+        }
+        if (unitId != null && unitId <= 0) {
+            throw new AppException("INVALID_UNIT_ID", "Unit ID must be greater than 0");
+        }
+    }
+
     private String resolveProfileCode(UUID profileId) {
         if (profileId == null) return null;
         return profileRepo.findById(profileId)
                 .map(MachineProfileEntity::getProfileCode)
                 .orElse(null);
+    }
+
+    private void validateMappingFileSelection(UUID profileId, UUID mappingFileId) {
+        if (mappingFileId == null) {
+            return;
+        }
+        MachineImportBatchEntity batch = batchRepo.findById(mappingFileId)
+                .orElseThrow(() -> new AppException("IMPORT_FILE_NOT_FOUND", "Mapping file not found: " + mappingFileId));
+
+        String type = batch.getImportType() == null ? "" : batch.getImportType().toUpperCase();
+        if (!"MAPPING".equals(type) && !"MAPPINGS".equals(type)) {
+            throw new AppException("INVALID_IMPORT_FILE_TYPE", "Selected file is not a mapping file");
+        }
+
+        String status = batch.getStatus() == null ? "" : batch.getStatus().toUpperCase();
+        if (!"COMPLETED".equals(status) && !"COMPLETED_WITH_ERRORS".equals(status)) {
+            throw new AppException("IMPORT_FILE_NOT_READY", "Mapping file is not ready: " + batch.getStatus());
+        }
+
+        // Intentionally do not enforce profile-mapping coupling.
+        // UI can select profile and mapping independently.
     }
 
     private MachineConfigResponse toResponse(MachineEntity m, String profileCode) {
@@ -198,6 +265,7 @@ public class MachineConfigServiceImpl implements MachineConfigService {
                 .connectionMode(m.getConnectionMode())
                 .autoConnect(m.getAutoConnect())
                 .profileId(m.getProfileId())
+                .mappingFileId(m.getMappingFileId())
                 .profileCode(profileCode)
                 .lineId(m.getLineId())
                 .plantId(m.getPlantId())
