@@ -8,6 +8,7 @@ import com.ghgande.j2mod.modbus.facade.ModbusTCPMaster;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -68,27 +69,84 @@ public class Easy521ModbusAdapter implements DeviceAdapter {
 
     @Override
     public boolean testConnection(MachineEntity machine) {
+        return testConnection(machine, List.of());
+    }
+
+    /**
+     * Mapping-aware test connection.
+     * Priority:
+     *  1) required=true mapping with smallest address
+     *  2) smallest mapping address
+     *  3) fallback holding register 0
+     */
+    public boolean testConnection(MachineEntity machine, List<MachineProfileMappingEntity> mappings) {
         String testHost = machine.getHost();
         int testPort = machine.getPort() != null ? machine.getPort() : 502;
+        int testUnitId = machine.getUnitId() != null ? machine.getUnitId() : 1;
 
         ModbusTCPMaster testMaster = null;
         try {
             testMaster = new ModbusTCPMaster(testHost, testPort);
             testMaster.setTimeout(3000);
             testMaster.connect();
-            // Try a simple read to verify communication
-            int testUnitId = machine.getUnitId() != null ? machine.getUnitId() : 1;
-            testMaster.readMultipleRegisters(testUnitId, 0, 1);
-            log.info("Test connection to {}:{} succeeded", testHost, testPort);
+
+            MachineProfileMappingEntity probe = selectProbeMapping(mappings);
+            if (probe == null) {
+                // Fallback for machines without mappings yet
+                testMaster.readMultipleRegisters(testUnitId, 0, 1);
+                log.info("Test connection to {}:{} succeeded (fallback HOLDING 0)", testHost, testPort);
+                return true;
+            }
+
+            String area = probe.getArea() != null ? probe.getArea().toUpperCase() : "HOLDING";
+            int address = probe.getAddressStart() != null ? probe.getAddressStart() : 0;
+            int quantity = registerCountForType(probe.getDataType());
+
+            if ("COIL".equals(area)) {
+                testMaster.readCoils(testUnitId, address, 1);
+            } else {
+                // Use holding read for INPUT/HOLDING as a pragmatic health probe.
+                testMaster.readMultipleRegisters(testUnitId, address, quantity);
+            }
+
+            log.info("Test connection to {}:{} succeeded (unit={}, area={}, address={}, qty={})",
+                    testHost, testPort, testUnitId, area, address, quantity);
             return true;
         } catch (Exception e) {
-            log.warn("Test connection to {}:{} failed: {}", testHost, testPort, e.getMessage());
+            log.warn("Test connection to {}:{} failed (unit={}): {}", testHost, testPort, testUnitId, e.getMessage());
             return false;
         } finally {
             if (testMaster != null) {
                 try { testMaster.disconnect(); } catch (Exception ignored) {}
             }
         }
+    }
+
+    private MachineProfileMappingEntity selectProbeMapping(List<MachineProfileMappingEntity> mappings) {
+        if (mappings == null || mappings.isEmpty()) {
+            return null;
+        }
+        return mappings.stream()
+                .filter(m -> m.getAddressStart() != null)
+                .sorted(Comparator
+                        .comparing((MachineProfileMappingEntity m) -> !Boolean.TRUE.equals(m.getIsRequired()))
+                        .thenComparing(MachineProfileMappingEntity::getAddressStart))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private int registerCountForType(String dataType) {
+        if (dataType == null) {
+            return 1;
+        }
+        String dt = dataType.toUpperCase();
+        if ("FLOAT64".equals(dt)) {
+            return 4;
+        }
+        if ("FLOAT32".equals(dt) || "INT32".equals(dt) || "UINT32".equals(dt)) {
+            return 2;
+        }
+        return 1;
     }
 
     @Override

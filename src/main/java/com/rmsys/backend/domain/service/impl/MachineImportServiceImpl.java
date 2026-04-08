@@ -42,6 +42,11 @@ import java.util.stream.Collectors;
 public class MachineImportServiceImpl implements MachineImportService {
 
     private static final Set<String> SUPPORTED_PROTOCOLS = Set.of("modbus-tcp", "opc-ua", "simulator");
+    private static final Set<String> SUPPORTED_MAPPING_AREAS = Set.of("COIL", "DISCRETE_INPUT", "HOLDING", "INPUT");
+    private static final Set<String> SUPPORTED_MAPPING_DATA_TYPES = Set.of(
+            "BOOL", "UINT16", "INT16", "UINT32", "INT32", "FLOAT32", "FLOAT64"
+    );
+    private static final int MIN_POLL_INTERVAL_MS = 200;
     private static final Set<String> REQUIRED_MACHINE_HEADERS = Set.of(
             "machine_code", "machine_name", "protocol", "host", "port", "unit_id", "profile_code", "poll_interval_ms", "auto_connect", "description"
     );
@@ -128,6 +133,12 @@ public class MachineImportServiceImpl implements MachineImportService {
                     }
                     Integer pollIntervalMs = parseIntField(record, "poll_interval_ms");
                     Boolean autoConnect = parseBoolField(record, "auto_connect");
+
+                    if (pollIntervalMs != null && pollIntervalMs < MIN_POLL_INTERVAL_MS) {
+                        errors.add(error(rowNum, "poll_interval_ms",
+                                "Poll interval must be >= " + MIN_POLL_INTERVAL_MS + " ms"));
+                        continue;
+                    }
 
                     if ("modbus-tcp".equalsIgnoreCase(protocol)) {
                         if (host == null || host.isBlank()) {
@@ -440,15 +451,25 @@ public class MachineImportServiceImpl implements MachineImportService {
                         errors.add(error(rowNum, "data_type", "Data type is required"));
                         continue;
                     }
+                    String areaNorm = area.trim().toUpperCase(Locale.ROOT);
+                    String dataTypeNorm = dataType.trim().toUpperCase(Locale.ROOT);
+                    if (!SUPPORTED_MAPPING_AREAS.contains(areaNorm)) {
+                        errors.add(error(rowNum, "area", "Unsupported area: " + area));
+                        continue;
+                    }
+                    if (!SUPPORTED_MAPPING_DATA_TYPES.contains(dataTypeNorm)) {
+                        errors.add(error(rowNum, "data_type", "Unsupported data type: " + dataType));
+                        continue;
+                    }
 
                     MachineProfileMappingEntity mapping = MachineProfileMappingEntity.builder()
                             .profileId(profile.getId())
                             .mappingFileId(batch.getId())
                             .logicalKey(logicalKey)
-                            .area(area)
+                            .area(areaNorm)
                             .addressStart(addressStart)
                             .addressEnd(parseIntFieldAny(record, "address_end"))
-                            .dataType(dataType)
+                            .dataType(dataTypeNorm)
                             .scaleFactor(parseDoubleFieldAny(record, 1.0, "scale", "scale_factor"))
                             .unit(getField(record, "unit"))
                             .byteOrder(getFieldOrDefault(record, "byte_order", "BIG"))
@@ -564,6 +585,12 @@ public class MachineImportServiceImpl implements MachineImportService {
                         errors.add(error(rowNum, "unit_id", "Unit ID must be greater than 0"));
                     }
                 }
+
+                Integer pollIntervalMs = parseIntField(record, "poll_interval_ms");
+                if (pollIntervalMs != null && pollIntervalMs < MIN_POLL_INTERVAL_MS) {
+                    errors.add(error(rowNum, "poll_interval_ms",
+                            "Poll interval must be >= " + MIN_POLL_INTERVAL_MS + " ms"));
+                }
             }
         } catch (Exception e) {
             throw new AppException("IMPORT_PARSE_ERROR", "Failed to parse CSV file: " + e.getMessage());
@@ -672,12 +699,16 @@ public class MachineImportServiceImpl implements MachineImportService {
 
                 if (isBlank(getField(record, "area"))) {
                     errors.add(error(rowNum, "area", "Area is required"));
+                } else if (!SUPPORTED_MAPPING_AREAS.contains(getField(record, "area").toUpperCase(Locale.ROOT))) {
+                    errors.add(error(rowNum, "area", "Unsupported area: " + getField(record, "area")));
                 }
                 if (parseIntFieldAny(record, "address", "address_start") == null) {
                     errors.add(error(rowNum, "address", "Address is required"));
                 }
                 if (isBlank(getField(record, "data_type"))) {
                     errors.add(error(rowNum, "data_type", "Data type is required"));
+                } else if (!SUPPORTED_MAPPING_DATA_TYPES.contains(getField(record, "data_type").toUpperCase(Locale.ROOT))) {
+                    errors.add(error(rowNum, "data_type", "Unsupported data type: " + getField(record, "data_type")));
                 }
             }
         } catch (Exception e) {
@@ -885,6 +916,12 @@ public class MachineImportServiceImpl implements MachineImportService {
                 }
                 Integer pollIntervalMs = record.getPollIntervalMs();
                 Boolean autoConnect = record.getAutoConnect();
+
+                if (pollIntervalMs != null && pollIntervalMs < MIN_POLL_INTERVAL_MS) {
+                    errors.add(error(rowNum, "poll_interval_ms",
+                            "Poll interval must be >= " + MIN_POLL_INTERVAL_MS + " ms"));
+                    continue;
+                }
 
                 if ("modbus-tcp".equalsIgnoreCase(protocol)) {
                     if (host == null || host.isBlank()) {
@@ -1160,6 +1197,16 @@ public class MachineImportServiceImpl implements MachineImportService {
                     errors.add(error(recordIndex, "data_type", "Data type is required"));
                     continue;
                 }
+                String areaNorm = area.trim().toUpperCase(Locale.ROOT);
+                String dataTypeNorm = dataType.trim().toUpperCase(Locale.ROOT);
+                if (!SUPPORTED_MAPPING_AREAS.contains(areaNorm)) {
+                    errors.add(error(recordIndex, "area", "Unsupported area: " + area));
+                    continue;
+                }
+                if (!SUPPORTED_MAPPING_DATA_TYPES.contains(dataTypeNorm)) {
+                    errors.add(error(recordIndex, "data_type", "Unsupported data type: " + dataType));
+                    continue;
+                }
 
                 Double scaleFactor = record.getScaleFactor() != null ? record.getScaleFactor() : record.getScale();
                 if (scaleFactor == null) {
@@ -1175,10 +1222,10 @@ public class MachineImportServiceImpl implements MachineImportService {
                         .profileId(fileProfile.getId())
                         .mappingFileId(batch.getId())
                         .logicalKey(logicalKey)
-                        .area(area)
+                        .area(areaNorm)
                         .addressStart(addressStart)
                         .addressEnd(record.getAddressEnd())
-                        .dataType(dataType)
+                        .dataType(dataTypeNorm)
                         .scaleFactor(scaleFactor)
                         .unit(record.getUnit())
                         .byteOrder(record.getByteOrder() != null ? record.getByteOrder() : "BIG")

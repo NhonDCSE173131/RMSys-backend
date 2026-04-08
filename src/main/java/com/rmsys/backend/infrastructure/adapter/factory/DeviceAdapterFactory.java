@@ -10,7 +10,8 @@ import org.springframework.stereotype.Component;
 /**
  * Factory that creates the appropriate DeviceAdapter based on machine config.
  * Selection rules:
- *  - protocol=simulator -> SimulatorAdapter
+ *  - protocol=simulator-internal (or legacy simulator) -> SimulatorAdapter
+ *  - protocol=simulator-http -> no polling adapter (ingest-only mode)
  *  - protocol=modbus-tcp + vendor=Easy + model=521 -> Easy521ModbusAdapter
  *  - protocol=modbus-tcp (generic) -> Easy521ModbusAdapter (default Modbus)
  */
@@ -27,6 +28,11 @@ public class DeviceAdapterFactory {
 
         switch (protocol.toLowerCase()) {
             case "simulator":
+            case "simulator-internal":
+                return new SimulatorAdapter();
+            case "simulator-http":
+                log.warn("protocol=simulator-http is ingest-only, falling back to SimulatorAdapter for safety on machine {}",
+                        machine.getCode());
                 return new SimulatorAdapter();
             case "modbus-tcp":
                 return createModbusAdapter(machine);

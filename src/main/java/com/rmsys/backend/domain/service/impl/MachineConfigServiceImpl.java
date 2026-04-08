@@ -200,6 +200,10 @@ public class MachineConfigServiceImpl implements MachineConfigService {
             throw new AppException("PROTOCOL_REQUIRED", "Protocol is required");
         }
         String normalized = protocol.trim().toLowerCase();
+        // Protocol taxonomy aliases for backward compatibility.
+        if ("simulator".equals(normalized)) {
+            normalized = "simulator-internal";
+        }
         if (!SUPPORTED_PROTOCOLS.contains(normalized)) {
             throw new AppException("UNSUPPORTED_PROTOCOL", "Protocol not supported: " + protocol);
         }

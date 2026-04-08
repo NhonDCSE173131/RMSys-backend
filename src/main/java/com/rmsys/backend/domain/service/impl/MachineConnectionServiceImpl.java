@@ -28,8 +28,15 @@ public class MachineConnectionServiceImpl implements MachineConnectionService {
     public MachineConnectionStatusResponse testConnection(UUID machineId) {
         MachineEntity machine = findMachine(machineId);
 
-        if (machine.getHost() == null || machine.getHost().isBlank()) {
-            throw new AppException("MISSING_HOST", "Machine host is not configured");
+        if (isBadConfig(machine)) {
+            return MachineConnectionStatusResponse.builder()
+                    .machineId(machineId)
+                    .machineCode(machine.getCode())
+                    .status("BAD_CONFIG")
+                    .connected(false)
+                    .message("Machine configuration is incomplete")
+                    .lastError("Missing protocol/host/port/unitId")
+                    .build();
         }
 
         boolean success = plcConnectionManager.testConnection(machine);
@@ -38,6 +45,8 @@ public class MachineConnectionServiceImpl implements MachineConnectionService {
                 .machineId(machineId)
                 .machineCode(machine.getCode())
                 .status(success ? "REACHABLE" : "UNREACHABLE")
+                .connected(success)
+                .message(success ? "Connection test succeeded" : "Connection test failed")
                 .lastError(success ? null : "Test connection failed")
                 .build();
     }
@@ -46,7 +55,16 @@ public class MachineConnectionServiceImpl implements MachineConnectionService {
     @Transactional
     public MachineConnectionStatusResponse connect(UUID machineId) {
         MachineEntity machine = findMachine(machineId);
-        validateConnectionConfig(machine);
+        if (isBadConfig(machine)) {
+            return MachineConnectionStatusResponse.builder()
+                    .machineId(machineId)
+                    .machineCode(machine.getCode())
+                    .status("BAD_CONFIG")
+                    .connected(false)
+                    .message("Machine configuration is incomplete")
+                    .lastError("Missing protocol/host/port/unitId")
+                    .build();
+        }
 
         plcConnectionManager.startConnection(machineId);
 
@@ -64,7 +82,9 @@ public class MachineConnectionServiceImpl implements MachineConnectionService {
         return MachineConnectionStatusResponse.builder()
                 .machineId(machineId)
                 .machineCode(machine.getCode())
-                .status(PlcConnectionStatus.DISCONNECTED.name())
+                .status("OFFLINE")
+                .connected(false)
+                .message("Disconnected")
                 .lastDisconnectedAt(Instant.now())
                 .build();
     }
@@ -73,7 +93,16 @@ public class MachineConnectionServiceImpl implements MachineConnectionService {
     @Transactional
     public MachineConnectionStatusResponse reconnect(UUID machineId) {
         MachineEntity machine = findMachine(machineId);
-        validateConnectionConfig(machine);
+        if (isBadConfig(machine)) {
+            return MachineConnectionStatusResponse.builder()
+                    .machineId(machineId)
+                    .machineCode(machine.getCode())
+                    .status("BAD_CONFIG")
+                    .connected(false)
+                    .message("Machine configuration is incomplete")
+                    .lastError("Missing protocol/host/port/unitId")
+                    .build();
+        }
 
         // Stop then start
         plcConnectionManager.stopConnection(machineId);
@@ -92,7 +121,9 @@ public class MachineConnectionServiceImpl implements MachineConnectionService {
         return MachineConnectionStatusResponse.builder()
                 .machineId(machineId)
                 .machineCode(machine.getCode())
-                .status(status)
+                .status(normalizeRuntimeStatus(status))
+                .connected(isConnectedStatus(status))
+                .message(buildMessage(status))
                 .lastConnectedAt(machine.getLastConnectedAt())
                 .lastDisconnectedAt(machine.getLastDisconnectedAt())
                 .lastDataAt(machine.getLastDataAt())
@@ -112,15 +143,20 @@ public class MachineConnectionServiceImpl implements MachineConnectionService {
                 .orElseThrow(() -> AppException.notFound("Machine", machineId));
     }
 
-    private void validateConnectionConfig(MachineEntity machine) {
+    private boolean isBadConfig(MachineEntity machine) {
         if (machine.getProtocol() == null || machine.getProtocol().isBlank()) {
-            throw new AppException("MISSING_PROTOCOL", "Machine protocol is not configured");
+            return true;
         }
-        if (!"simulator".equalsIgnoreCase(machine.getProtocol())) {
-            if (machine.getHost() == null || machine.getHost().isBlank()) {
-                throw new AppException("MISSING_HOST", "Machine host is not configured");
-            }
+        if ("simulator".equalsIgnoreCase(machine.getProtocol())) {
+            return false;
         }
+        if (machine.getHost() == null || machine.getHost().isBlank()) {
+            return true;
+        }
+        if (machine.getPort() == null || machine.getPort() <= 0) {
+            return true;
+        }
+        return machine.getUnitId() == null || machine.getUnitId() <= 0;
     }
 
     private MachineConnectionStatusResponse buildStatusResponse(UUID machineId, String code, String status) {
@@ -128,12 +164,40 @@ public class MachineConnectionServiceImpl implements MachineConnectionService {
         return MachineConnectionStatusResponse.builder()
                 .machineId(machineId)
                 .machineCode(code)
-                .status(status)
+                .status(normalizeRuntimeStatus(status))
+                .connected(isConnectedStatus(status))
+                .message(buildMessage(status))
                 .lastConnectedAt(machine != null ? machine.getLastConnectedAt() : null)
                 .lastDisconnectedAt(machine != null ? machine.getLastDisconnectedAt() : null)
                 .lastDataAt(machine != null ? machine.getLastDataAt() : null)
                 .lastError(machine != null ? machine.getLastConnectionReasonDetail() : null)
                 .build();
+    }
+
+    private String normalizeRuntimeStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return "OFFLINE";
+        }
+        String s = status.toUpperCase();
+        if (PlcConnectionStatus.DISCONNECTED.name().equals(s) || PlcConnectionStatus.DISABLED.name().equals(s)) {
+            return "OFFLINE";
+        }
+        return s;
+    }
+
+    private boolean isConnectedStatus(String status) {
+        return PlcConnectionStatus.ONLINE.name().equalsIgnoreCase(status);
+    }
+
+    private String buildMessage(String status) {
+        String normalized = normalizeRuntimeStatus(status);
+        return switch (normalized) {
+            case "ONLINE" -> "Machine is connected";
+            case "STALE" -> "Machine connected but data is stale";
+            case "ERROR" -> "Machine connection error";
+            case "BAD_CONFIG" -> "Machine configuration is invalid";
+            default -> "Machine is offline";
+        };
     }
 }
 

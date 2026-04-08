@@ -174,6 +174,7 @@ public class IngestServiceImpl implements IngestService {
                 .connectionStatus(dto.connectionStatus())
                 .machineState(dto.machineState())
                 .operationMode(dto.operationMode())
+                .alarmActive(dto.alarmCode() != null && dto.alarmCode() != 0)
                 .programName(dto.programName())
                 .cycleRunning(dto.cycleRunning())
                 .powerKw(dto.powerKw())

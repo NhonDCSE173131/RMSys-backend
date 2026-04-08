@@ -13,6 +13,7 @@ import com.rmsys.backend.domain.service.MachineMappingService;
 import com.rmsys.backend.domain.service.PlcConnectionManager;
 import com.rmsys.backend.infrastructure.adapter.DeviceAdapter;
 import com.rmsys.backend.infrastructure.adapter.factory.DeviceAdapterFactory;
+import com.rmsys.backend.infrastructure.adapter.easy.Easy521ModbusAdapter;
 import jakarta.annotation.PreDestroy;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +23,7 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 /**
  * Manages runtime PLC connections for all machines.
@@ -31,6 +33,8 @@ import java.util.concurrent.*;
 @Slf4j
 @Component
 public class PlcConnectionManagerImpl implements PlcConnectionManager {
+
+    private static final int EMPTY_PAYLOAD_STALE_THRESHOLD = 5;
 
     private final MachineRepository machineRepo;
     private final MachineProfileMappingRepository mappingRepo;
@@ -147,12 +151,12 @@ public class PlcConnectionManagerImpl implements PlcConnectionManager {
             }
         }
 
-        session.status = PlcConnectionStatus.DISCONNECTED.name();
+        session.status = "OFFLINE";
         session.lastDisconnectedAt = Instant.now();
 
         // Update DB
         machineRepo.findById(machineId).ifPresent(m -> {
-            m.setLastConnectionStatus(PlcConnectionStatus.DISCONNECTED.name());
+            m.setLastConnectionStatus("OFFLINE");
             m.setLastDisconnectedAt(Instant.now());
             machineRepo.save(m);
         });
@@ -164,13 +168,17 @@ public class PlcConnectionManagerImpl implements PlcConnectionManager {
     @Override
     public boolean testConnection(MachineEntity machine) {
         DeviceAdapter adapter = adapterFactory.createAdapter(machine);
+        if (adapter instanceof Easy521ModbusAdapter easyAdapter) {
+            List<MachineProfileMappingEntity> mappings = loadMappings(machine);
+            return easyAdapter.testConnection(machine, mappings);
+        }
         return adapter.testConnection(machine);
     }
 
     @Override
     public String getConnectionStatus(UUID machineId) {
         MachineRuntimeSession session = sessions.get(machineId);
-        if (session == null) return PlcConnectionStatus.DISCONNECTED.name();
+        if (session == null) return "OFFLINE";
         return session.status;
     }
 
@@ -222,7 +230,11 @@ public class PlcConnectionManagerImpl implements PlcConnectionManager {
 
             Map<String, Object> rawValues = session.adapter.readData(session.mappings);
             if (rawValues == null || rawValues.isEmpty()) {
-                log.debug("Empty data from machine {}", session.machineCode);
+                session.consecutiveEmptyReads++;
+                log.debug("Empty data from machine {} (emptyReads={})", session.machineCode, session.consecutiveEmptyReads);
+                if (session.consecutiveEmptyReads >= EMPTY_PAYLOAD_STALE_THRESHOLD) {
+                    handleDisconnect(machineId, session, "No data received for " + session.consecutiveEmptyReads + " polls");
+                }
                 return;
             }
 
@@ -242,13 +254,41 @@ public class PlcConnectionManagerImpl implements PlcConnectionManager {
 
             // Update session
             session.lastDataAt = Instant.now();
+            session.lastSuccessfulPollAt = Instant.now();
             session.status = PlcConnectionStatus.ONLINE.name();
             session.consecutiveErrors = 0;
+            session.consecutiveEmptyReads = 0;
 
             // Update DB lastDataAt
             machine.setLastDataAt(Instant.now());
             machine.setLastConnectionStatus(PlcConnectionStatus.ONLINE.name());
             machineRepo.save(machine);
+
+            String protocol = Optional.ofNullable(session.adapter.getProtocol())
+                    .filter(p -> !p.isBlank())
+                    .orElse(machine.getProtocol());
+            String mappedKeys = rawValues.keySet().stream()
+                    .sorted()
+                    .collect(Collectors.joining(","));
+            log.info("Poll OK machine={}, protocol={}, host={}, port={}, mappedKeys={}, temperature={}, powerKw={}, spindleSpeedRpm={}, running={}, alarmCode={}, outputCount={}, goodCount={}, rejectCount={}, runtimeHours={}, cycleTimeSec={}, vibrationMmS={}, voltageV={}, currentA={}",
+                    machine.getCode(),
+                    protocol,
+                    machine.getHost(),
+                    machine.getPort(),
+                    mappedKeys,
+                    dto.temperatureC(),
+                    dto.powerKw(),
+                    dto.spindleSpeedRpm(),
+                    dto.cycleRunning(),
+                    dto.alarmCode(),
+                    dto.outputCount(),
+                    dto.goodCount(),
+                    dto.rejectCount(),
+                    dto.runtimeHours(),
+                    dto.cycleTimeSec(),
+                    dto.vibrationMmS(),
+                    dto.voltageV(),
+                    dto.currentA());
 
         } catch (Exception e) {
             session.consecutiveErrors++;
@@ -304,6 +344,8 @@ public class PlcConnectionManagerImpl implements PlcConnectionManager {
             session.status = PlcConnectionStatus.ONLINE.name();
             session.lastConnectedAt = Instant.now();
             session.consecutiveErrors = 0;
+            session.consecutiveEmptyReads = 0;
+            session.reconnectAttempts = 0;
             session.mappings = loadMappings(machine);
 
             machine.setLastConnectionStatus(PlcConnectionStatus.ONLINE.name());
@@ -312,6 +354,7 @@ public class PlcConnectionManagerImpl implements PlcConnectionManager {
 
             log.info("Reconnected machine {}", session.machineCode);
         } else {
+            session.reconnectAttempts++;
             session.status = PlcConnectionStatus.ERROR.name();
             session.lastError = "Reconnect failed";
 
@@ -369,8 +412,11 @@ public class PlcConnectionManagerImpl implements PlcConnectionManager {
         Instant lastConnectedAt;
         Instant lastDisconnectedAt;
         Instant lastDataAt;
+        Instant lastSuccessfulPollAt;
         String lastError;
         int consecutiveErrors;
+        int consecutiveEmptyReads;
+        int reconnectAttempts;
         ScheduledFuture<?> pollFuture;
 
         public boolean isRunning() {

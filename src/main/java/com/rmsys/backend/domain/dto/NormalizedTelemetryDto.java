@@ -28,6 +28,7 @@ public record NormalizedTelemetryDto(
         @PositiveOrZero Integer outputCount,
         @PositiveOrZero Integer goodCount,
         @PositiveOrZero Integer rejectCount,
+        Integer alarmCode,
         @PositiveOrZero Double spindleSpeedRpm,
         @PositiveOrZero Double feedRateMmMin,
         @PositiveOrZero Double idealCycleTimeSec,

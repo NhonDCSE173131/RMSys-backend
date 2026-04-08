@@ -38,11 +38,15 @@ public class IngestController {
     @Value("${app.ingest.api-key:}")
     private String ingestApiKey;
 
+    @Value("${app.ingest.http-enabled:false}")
+    private boolean ingestHttpEnabled;
+
     @PostMapping("/telemetry")
     @Operation(summary = "Ingest normalized telemetry data")
     public ApiResponse<Void> ingestTelemetry(
             @RequestHeader(value = "X-Ingest-Key", required = false) String ingestKey,
             @Valid @RequestBody IngestTelemetryRequest request) {
+        ensureIngestHttpEnabled();
         validateIngestKey(ingestKey);
         ingestService.ingestTelemetry(toTelemetryDto(request));
         return ApiResponse.ok(null, "Telemetry ingested");
@@ -53,6 +57,7 @@ public class IngestController {
     public ApiResponse<Void> ingestTelemetryByCode(
             @RequestHeader(value = "X-Ingest-Key", required = false) String ingestKey,
             @Valid @RequestBody IngestTelemetryByCodeRequest request) {
+        ensureIngestHttpEnabled();
         validateIngestKey(ingestKey);
 
         var machine = machineIdentityResolverService.resolveRequired((java.util.UUID) null, request.machineCode());
@@ -66,6 +71,7 @@ public class IngestController {
     public ApiResponse<Void> ingestAlarm(
             @RequestHeader(value = "X-Ingest-Key", required = false) String ingestKey,
             @Valid @RequestBody NormalizedAlarmDto dto) {
+        ensureIngestHttpEnabled();
         validateIngestKey(ingestKey);
         ingestService.ingestAlarm(dto);
         return ApiResponse.ok(null, "Alarm ingested");
@@ -76,6 +82,7 @@ public class IngestController {
     public ApiResponse<Void> ingestDowntime(
             @RequestHeader(value = "X-Ingest-Key", required = false) String ingestKey,
             @Valid @RequestBody NormalizedDowntimeDto dto) {
+        ensureIngestHttpEnabled();
         validateIngestKey(ingestKey);
         ingestService.ingestDowntime(dto);
         return ApiResponse.ok(null, "Downtime ingested");
@@ -86,6 +93,7 @@ public class IngestController {
     public ApiResponse<Void> ingestConnectionStatus(
             @RequestHeader(value = "X-Ingest-Key", required = false) String ingestKey,
             @Valid @RequestBody IngestConnectionStatusRequest request) {
+        ensureIngestHttpEnabled();
         validateIngestKey(ingestKey);
 
         var machine = machineIdentityResolverService.resolveRequired(request.machineId(), request.machineCode());
@@ -105,6 +113,12 @@ public class IngestController {
         }
         if (!ingestApiKey.equals(ingestKey)) {
             throw new AppException("UNAUTHORIZED", "Invalid ingest API key");
+        }
+    }
+
+    private void ensureIngestHttpEnabled() {
+        if (!ingestHttpEnabled) {
+            throw new AppException("INGEST_HTTP_DISABLED", "External ingest endpoints are disabled");
         }
     }
 

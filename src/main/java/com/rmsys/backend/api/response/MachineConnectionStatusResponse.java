@@ -10,6 +10,8 @@ public class MachineConnectionStatusResponse {
     private UUID machineId;
     private String machineCode;
     private String status;
+    private Boolean connected;
+    private String message;
     private Instant lastConnectedAt;
     private Instant lastDisconnectedAt;
     private Instant lastDataAt;

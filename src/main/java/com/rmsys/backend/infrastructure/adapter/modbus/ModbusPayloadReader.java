@@ -46,7 +46,7 @@ public class ModbusPayloadReader {
     }
 
     private Object readMapping(MachineProfileMappingEntity mapping) throws Exception {
-        String area = mapping.getArea().toLowerCase();
+        String area = normalizeArea(mapping.getArea());
         int address = mapping.getAddressStart();
 
         switch (area) {
@@ -72,6 +72,19 @@ public class ModbusPayloadReader {
                 log.warn("Unknown area type '{}' for mapping '{}'", area, mapping.getLogicalKey());
                 return null;
         }
+    }
+
+    private String normalizeArea(String rawArea) {
+        if (rawArea == null) {
+            return "";
+        }
+        return switch (rawArea.trim().toLowerCase()) {
+            case "holding", "holding_register", "hr" -> "holding_register";
+            case "input", "input_register", "ir" -> "input_register";
+            case "coil", "coils" -> "coil";
+            case "discrete_input", "discrete", "di" -> "discrete_input";
+            default -> rawArea.trim().toLowerCase();
+        };
     }
 }
 
